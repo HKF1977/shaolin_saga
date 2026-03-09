@@ -37,6 +37,8 @@ from time import time as current_time
 
 # At the top of your main files:
 from rate_limiter import queue_discord_send, MessagePriority, get_message_queue, monitor_rate_limits, safe_rpc_call, log_rpc_stats, get_rpc_rate_limiter, ensure_queue_processing, monitor_memory_usage
+from telegram_sender import queue_telegram_send, get_telegram_targets, ensure_telegram_queue_processing
+from telegram_formatter import format_all_tokens, format_new_coin_with_socials
 
 #Get vars from config.py
 #sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -2170,6 +2172,11 @@ async def handle_message(data):
             #websocket_logger.info("QUEUED ALL TOKEN EMBED")
             #await asyncio.sleep(1)  # Add 1 second delay between sends
 
+    # Telegram: all_tokens
+    tg_text = format_all_tokens(enriched_data)
+    for target in get_telegram_targets('all_tokens'):
+        await queue_telegram_send(target['chat_id'], target['thread_id'], tg_text, 'all_tokens', websocket_logger)
+
     # 5.
     if three_socials:
         for server in servers['allowed_servers']:
@@ -2177,6 +2184,11 @@ async def handle_message(data):
             channel = get_channel(server['server_id'], 'new_coin_with_socials')
             if channel:
                 await queue_discord_send(channel, embed, "new_coin_with_socials", websocket_logger, MessagePriority.HIGH)
+
+        # Telegram: new_coin_with_socials
+        tg_text_socials = format_new_coin_with_socials(enriched_data)
+        for target in get_telegram_targets('new_coin_with_socials'):
+            await queue_telegram_send(target['chat_id'], target['thread_id'], tg_text_socials, 'new_coin_with_socials', websocket_logger)
 
 def decode_create_instruction(ix_data, ix_def, accounts):
     args = {}
@@ -2401,6 +2413,7 @@ async def on_ready():
     #Get message queue 
     message_queue = get_message_queue()
     await ensure_queue_processing()
+    await ensure_telegram_queue_processing()
 
     asyncio.create_task(monitor_memory_usage(websocket_logger))
 

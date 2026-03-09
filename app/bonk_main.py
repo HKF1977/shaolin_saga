@@ -18,6 +18,8 @@ from solders.pubkey import Pubkey
 from solana.rpc.async_api import AsyncClient
 from utils import get_top_holders, safe_json_write
 from rate_limiter import queue_discord_send, MessagePriority, get_message_queue, monitor_rate_limits, safe_rpc_call, log_rpc_stats, get_rpc_rate_limiter, ensure_queue_processing, monitor_memory_usage
+from telegram_sender import queue_telegram_send, get_telegram_targets
+from telegram_formatter import format_new_bonk_tokens
 
 # Global variables
 bot = None
@@ -412,6 +414,11 @@ async def handle_bonk_token_creation(decoded_data, accounts):
                     bonk_logger.error(f"❌ Failed to send embed to server {server_id}: {str(e)}")
             else:
                 bonk_logger.warning(f"⚠️ No suitable channel found for server {server_id}")
+
+        # Telegram: new_bonk_tokens
+        tg_text = format_new_bonk_tokens(token_data)
+        for target in get_telegram_targets('new_bonk_tokens'):
+            await queue_telegram_send(target['chat_id'], target['thread_id'], tg_text, 'new_bonk_tokens', bonk_logger)
         
         # Console output
         print("=" * 50)

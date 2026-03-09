@@ -1,0 +1,19 @@
+{
+  "groups": [
+    {
+      "name": "Shaolin Saga (Free)",
+      "chat_id": "-1003759203307",
+      "topics": {
+        "all_tokens": 5,
+        "new_bonk_tokens": 6
+      }
+    },
+    {
+      "name": "Shaolin Saga Alpha (Premium)",
+      "chat_id": "-1003838056995",
+      "topics": {
+        "new_coin_with_socials": 3
+      }
+    }
+  ]
+}
