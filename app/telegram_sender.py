@@ -17,7 +17,7 @@ with open('/home/shaolin_saga/config/telegram_channels.json', 'r') as f:
     _tg_config = json.load(f)
 
 
-def get_telegram_targets(signal_type: str) -> list[dict]:
+def get_telegram_targets(signal_type: str) -> list:
     """Return list of {chat_id, thread_id} dicts for a given signal type."""
     targets = []
     for group in _tg_config['groups']:
