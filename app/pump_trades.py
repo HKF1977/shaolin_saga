@@ -30,7 +30,7 @@ from solders.pubkey import Pubkey
 from collections import deque
 from time import time as current_time
 from rate_limiter import queue_discord_send, MessagePriority, get_message_queue, monitor_rate_limits, ensure_queue_processing, monitor_memory_usage
-from telegram_sender import queue_telegram_send, get_telegram_targets
+from telegram_sender import queue_telegram_send, get_telegram_targets, ensure_telegram_queue_processing
 from telegram_formatter import format_whale_large_trade
 
 #Get vars from config.py
@@ -1133,7 +1133,8 @@ async def on_ready():
     #Get message queue
     message_queue = get_message_queue()
     await ensure_queue_processing()
-   
+    await ensure_telegram_queue_processing()
+
     asyncio.create_task(monitor_memory_usage(websocket_secondary_logger))
     bot.loop.create_task(listen_and_decode_trades())
     bot.loop.create_task(message_queue.process_queue())
