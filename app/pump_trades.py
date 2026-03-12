@@ -30,6 +30,8 @@ from solders.pubkey import Pubkey
 from collections import deque
 from time import time as current_time
 from rate_limiter import queue_discord_send, MessagePriority, get_message_queue, monitor_rate_limits, ensure_queue_processing, monitor_memory_usage
+from telegram_sender import queue_telegram_send, get_telegram_targets
+from telegram_formatter import format_whale_large_trade
 
 #Get vars from config.py
 sys.path.append('/home/shaolin_saga/config')
@@ -628,7 +630,13 @@ async def trigger_trade_alert(trade_data):
         if channel:
             websocket_secondary_logger.info(f"{channel_type}")
             await queue_discord_send(channel, embed, channel_type, websocket_secondary_logger, MessagePriority.HIGH)
-            await asyncio.sleep(0.5)  # Small delay between servers  
+            await asyncio.sleep(0.5)  # Small delay between servers
+
+    # Telegram: whale_trades and large_trades (not pre_pump)
+    if channel_type in ("whale_trades", "large_trades"):
+        tg_text = format_whale_large_trade(trade_data, token_name, token_symbol, mint, channel_type)
+        for target in get_telegram_targets(channel_type):
+            await queue_telegram_send(target['chat_id'], target['thread_id'], tg_text, channel_type, websocket_secondary_logger)
 
 
 async def trigger_wallet_tracker_alert(trade_data):

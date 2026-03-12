@@ -5,14 +5,20 @@
       "chat_id": "-1003759203307",
       "topics": {
         "all_tokens": 5,
-        "new_bonk_tokens": 6
+        "new_bonk_tokens": 6,
+        "pump_livestreams": 92
       }
     },
     {
       "name": "Shaolin Saga Alpha (Premium)",
       "chat_id": "-1003838056995",
       "topics": {
-        "new_coin_with_socials": 3
+        "new_coin_with_socials": 3,
+        "80_bonding_curve": 12,
+        "bonding_curve_completed": 13,
+        "trade_signals": 14,
+        "large_trades": 15,
+        "whale_trades": 16
       }
     }
   ]

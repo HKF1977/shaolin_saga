@@ -38,7 +38,7 @@ from time import time as current_time
 # At the top of your main files:
 from rate_limiter import queue_discord_send, MessagePriority, get_message_queue, monitor_rate_limits, safe_rpc_call, log_rpc_stats, get_rpc_rate_limiter, ensure_queue_processing, monitor_memory_usage
 from telegram_sender import queue_telegram_send, get_telegram_targets, ensure_telegram_queue_processing
-from telegram_formatter import format_all_tokens, format_new_coin_with_socials
+from telegram_formatter import format_all_tokens, format_new_coin_with_socials, format_bonding_curve, format_trade_signal, format_pump_livestream
 
 #Get vars from config.py
 #sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -245,6 +245,11 @@ async def trigger_livestream_alert(stream_data):
                 livestream_logger.info(f"Sent livestream alert for {stream_data.get('mint')} to server {server['server_id']}")
                 await asyncio.sleep(1)
 
+    # Telegram: pump_livestreams
+    tg_text = format_pump_livestream(stream_data)
+    for target in get_telegram_targets('pump_livestreams'):
+        await queue_telegram_send(target['chat_id'], target['thread_id'], tg_text, 'pump_livestreams', websocket_logger)
+
 async def create_livestream_embed(stream_data):
     """Create Discord embed for new livestream"""
     mint = stream_data.get('mint', 'Unknown')
@@ -385,6 +390,11 @@ async def check_and_alert_if_clean(mint_address: str, servers_config: list, get_
                     await queue_discord_send(channel, embed, "trade_signals", logger, MessagePriority.HIGH)
                     if logger:
                         logger.info(f"✅ Sent clean bundle alert for {mint_address} to server {server['server_id']}")
+
+            # Telegram: trade_signals
+            tg_text = format_trade_signal(mint_address, metadata, score)
+            for target in get_telegram_targets('trade_signals'):
+                await queue_telegram_send(target['chat_id'], target['thread_id'], tg_text, 'trade_signals', logger)
             
     except Exception as e:
         if logger:
@@ -829,6 +839,22 @@ async def trigger_discord_alert(bonding_curve, mint, stage):
             except Exception as e:
                 bonding_logger.error(f"Error sending embed: {str(e)}")
                 bonding_logger.error(f"Full traceback: {traceback.format_exc()}")
+
+    # Telegram: bonding curve milestones (80% and complete only)
+    if stage == "80percent":
+        tg_signal = "80_bonding_curve"
+    elif stage == "complete":
+        tg_signal = "bonding_curve_completed"
+    else:
+        tg_signal = None
+
+    if tg_signal:
+        tg_targets = get_telegram_targets(tg_signal)
+        if tg_targets:
+            tx_data = await get_saved_transaction_metadata(mint, bonding_logger)
+            tg_text = format_bonding_curve(mint, stage, tx_data)
+            for target in tg_targets:
+                await queue_telegram_send(target['chat_id'], target['thread_id'], tg_text, tg_signal, bonding_logger)
 
 # Global momentum cache
 momentum_cache = {}
