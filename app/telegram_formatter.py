@@ -218,6 +218,59 @@ def format_whale_large_trade(trade_data: dict, token_name: str, token_symbol: st
     )
 
 
+def format_dexscreener_boost(mint: str, name: str, symbol: str, user: str, description: str,
+                             twitter_url: str, telegram_url: str, website_url: str,
+                             amount, signal_type: str) -> str:
+    """
+    Formatter for DexScreener boost signals (dexscreener_boosts and dexscreener_top_boosts).
+    """
+    header = "🔥 <b>Dex Most Boosted!</b>" if signal_type == "dexscreener_top_boosts" else "⚡ <b>New Dex Boost!</b>"
+
+    if description and len(description) > 200:
+        description = description[:197] + "..."
+
+    socials = _socials_line(twitter_url, telegram_url, website_url)
+    links = _trade_links(mint)
+    creator_line = f'👤 <a href="https://solscan.io/account/{user}">Creator</a>\n' if user else ""
+
+    return (
+        f"{header}\n\n"
+        f"<b>{name} (${symbol})</b>\n"
+        f"<code>{mint}</code>\n\n"
+        f"📝 {description or 'No Description Added'}\n\n"
+        f"{creator_line}"
+        f"⚡ Boost Amount: <b>{amount}</b>\n"
+        f"🔗 {socials}\n\n"
+        f"{links}"
+    )
+
+
+def format_dexscreener_paid(mint: str, name: str, symbol: str, user: str, description: str,
+                            twitter_url: str, telegram_url: str, website_url: str,
+                            dex_url: str) -> str:
+    """
+    Formatter for DexScreener paid listing (dexscreener_updates).
+    """
+    if description and len(description) > 200:
+        description = description[:197] + "..."
+
+    socials = _socials_line(twitter_url, telegram_url, website_url)
+    links = _trade_links(mint)
+    creator_line = f'👤 <a href="https://solscan.io/account/{user}">Creator</a>\n' if user else ""
+    dex_line = f'📊 <a href="{dex_url}">Dex Profile</a>\n' if dex_url else ""
+
+    return (
+        f"💎 <b>Dex Paid!</b>\n\n"
+        f"<b>{name} (${symbol})</b>\n"
+        f"<code>{mint}</code>\n\n"
+        f"📝 {description or 'No Description Added'}\n\n"
+        f"{creator_line}"
+        f"{dex_line}"
+        f"🔗 {socials}\n\n"
+        f"{links}"
+    )
+
+
 def format_pump_livestream(stream_data: dict) -> str:
     """
     Formatter for pump.fun livestreams (pump_livestreams signal).

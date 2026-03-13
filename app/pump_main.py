@@ -38,7 +38,7 @@ from time import time as current_time
 # At the top of your main files:
 from rate_limiter import queue_discord_send, MessagePriority, get_message_queue, monitor_rate_limits, safe_rpc_call, log_rpc_stats, get_rpc_rate_limiter, ensure_queue_processing, monitor_memory_usage
 from telegram_sender import queue_telegram_send, get_telegram_targets, ensure_telegram_queue_processing
-from telegram_formatter import format_all_tokens, format_new_coin_with_socials, format_bonding_curve, format_trade_signal, format_pump_livestream
+from telegram_formatter import format_all_tokens, format_new_coin_with_socials, format_bonding_curve, format_trade_signal, format_pump_livestream, format_dexscreener_boost, format_dexscreener_paid
 
 #Get vars from config.py
 #sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -1544,6 +1544,14 @@ async def trigger_top_boost_notification(token):
                 await queue_discord_send(channel, embed, "dexscreener_top_boosts", dexscreener_logger, MessagePriority.MEDIUM)
                 dexscreener_logger.info(f"Sent top boost notification for dexscreener_top_boosts to server {server['server_id']}")
 
+    tg_text = format_dexscreener_boost(
+        mint, token_name or 'Unknown', token_symbol or '?', user,
+        token.get('description'), twitter_url, telegram_url, website_url,
+        token.get('totalAmount'), "dexscreener_top_boosts"
+    )
+    for target in get_telegram_targets("dexscreener_top_boosts"):
+        await queue_telegram_send(target['chat_id'], target['thread_id'], tg_text, "dexscreener_top_boosts", dexscreener_logger)
+
 
 async def fetch_dexscreener_boosted_tokens():
     """Fetch the latest boosted tokens from DexScreener API"""
@@ -1653,6 +1661,34 @@ async def trigger_dexscreener_alert(data):
             if channel:
                 await queue_discord_send(channel, embed, "dexscreener_updates", websocket_logger, MessagePriority.MEDIUM)
                 await asyncio.sleep(1)
+
+    mint = data['tokenAddress']
+    tg_name, tg_symbol, tg_user = 'Unknown', '?', None
+    tg_twitter, tg_telegram, tg_website = None, None, None
+    if "pump" in mint:
+        tx_data = await get_saved_transaction_metadata(mint, dexscreener_logger)
+        if tx_data:
+            tg_name = tx_data['name']
+            tg_symbol = tx_data['symbol']
+            tg_user = tx_data['user']
+            tg_twitter = tx_data['twitter_url']
+            tg_telegram = tx_data['telegram_url']
+            tg_website = tx_data['website_url']
+    elif "bonk" in mint:
+        tx_data = await get_saved_bonk_metadata(mint)
+        if tx_data:
+            tg_name = tx_data['name']
+            tg_symbol = tx_data['symbol']
+            tg_user = tx_data['user']
+            tg_twitter = tx_data['twitter_url']
+            tg_telegram = tx_data['telegram_url']
+            tg_website = tx_data['website_url']
+    tg_text = format_dexscreener_paid(
+        mint, tg_name, tg_symbol, tg_user,
+        data.get('description'), tg_twitter, tg_telegram, tg_website, data.get('url')
+    )
+    for target in get_telegram_targets("dexscreener_updates"):
+        await queue_telegram_send(target['chat_id'], target['thread_id'], tg_text, "dexscreener_updates", dexscreener_logger)
 
 async def get_metadata(uri):
     """Fetch metadata from IPFS with fallback gateways"""
@@ -2003,6 +2039,14 @@ async def trigger_dexscreener_boosted_embed(token):
             if channel:
                 await queue_discord_send(channel, embed, "dexscreener_boosts", websocket_logger, MessagePriority.MEDIUM)
                 dexscreener_logger.info(f"Sent boost notification for dexscreener_boosts to server {server['server_id']}")
+
+    tg_text = format_dexscreener_boost(
+        mint, token_name or 'Unknown', token_symbol or '?', user,
+        token.get('description'), twitter_url, telegram_url, website_url,
+        token.get('totalAmount'), "dexscreener_boosts"
+    )
+    for target in get_telegram_targets("dexscreener_boosts"):
+        await queue_telegram_send(target['chat_id'], target['thread_id'], tg_text, "dexscreener_boosts", dexscreener_logger)
 
 
 def calculate_time_to_bonding(created_timestamp: float) -> str:

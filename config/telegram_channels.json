@@ -18,7 +18,10 @@
         "bonding_curve_completed": 13,
         "trade_signals": 14,
         "large_trades": 15,
-        "whale_trades": 16
+        "whale_trades": 16,
+        "dexscreener_boosts": 304,
+        "dexscreener_top_boosts": 310,
+        "dexscreener_updates": 297
       }
     }
   ]
