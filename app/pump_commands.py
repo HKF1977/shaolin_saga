@@ -1568,7 +1568,7 @@ def register_commands(bot, logger):
 
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    "https://api.totoml.app/api/metadata/get_past_usernames",
+                    "https://toto.oz.xyz/api/metadata/get_past_usernames",
                     headers=headers,
                     json=payload
                 ) as response:
@@ -1592,12 +1592,12 @@ def register_commands(bot, logger):
 
                     elif response.status == 403:
                         await interaction.followup.send("❌ API access denied. Please check API key configuration.")
-                        logger.error("Totoml API returned 403 - check API key")
+                        logger.error("Toto API returned 403 - check API key")
                         return
 
                     elif response.status != 200:
                         await interaction.followup.send(f"❌ API error: {response.status}")
-                        logger.error(f"Totoml API returned {response.status}: {await response.text()}")
+                        logger.error(f"Toto API returned {response.status}: {await response.text()}")
                         return
 
                     data = await response.json()
