@@ -13,6 +13,8 @@ from solana.rpc.async_api import AsyncClient
 from solders.pubkey import Pubkey
 from utils import format_social_link, get_saved_bonk_metadata, get_top_holders, safe_json_read, safe_json_write, safe_file_move, safe_file_exists, safe_file_delete
 from rate_limiter import queue_discord_send, MessagePriority, safe_rpc_call
+from telegram_sender import queue_telegram_send, get_telegram_targets
+from telegram_formatter import format_bonk_bonding_curve
 import sys
 
 sys.path.append('/home/shaolin_saga/config')
@@ -342,6 +344,20 @@ async def trigger_bonk_discord_alert(bonding_curve_address, token_mint, stage, a
             except Exception as e:
                 bonk_bonding_logger.error(f"Error sending bonk embed: {str(e)}")
                 bonk_bonding_logger.error(f"Full traceback: {traceback.format_exc()}")
+
+    if stage in ("80percent", "complete"):
+        tg_signal = "80_bonk_bonding" if stage == "80percent" else "bonk_bonding_completed"
+        token_data = await get_saved_bonk_metadata(token_mint)
+        if token_data:
+            creator = token_data.get('account_mapping', {}).get('creator')
+            tg_text = format_bonk_bonding_curve(
+                token_mint, stage,
+                token_data.get('name', 'Unknown'), token_data.get('symbol', '?'),
+                creator, token_data.get('twitter_url'), token_data.get('telegram_url'),
+                token_data.get('website_url'), actual_progress
+            )
+            for target in get_telegram_targets(tg_signal):
+                await queue_telegram_send(target['chat_id'], target['thread_id'], tg_text, tg_signal, bonk_bonding_logger)
 
 async def create_bonk_bonding_embed(bonding_curve_address, token_mint, stage, actual_progress, calc_values):
     """Create Discord embed for bonk bonding curve alerts"""

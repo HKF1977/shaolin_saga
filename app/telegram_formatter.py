@@ -247,6 +247,60 @@ def format_wallet_tracker(mint: str, token_name: str, token_symbol: str,
     )
 
 
+def format_based_dev(creator: str, mint: str, token_name: str, token_symbol: str,
+                     total_tokens: int, successful_tokens: int, performance_score: int,
+                     twitter_url: str, telegram_url: str, website_url: str) -> str:
+    """
+    Formatter for based dev creator alerts (based_dev signal).
+    """
+    creator_url = f"https://solscan.io/account/{creator}"
+    success_rate = int(successful_tokens / total_tokens * 100) if total_tokens > 0 else 0
+    socials = _socials_line(twitter_url, telegram_url, website_url)
+    links = _trade_links(mint)
+
+    return (
+        f"🔥 <b>Based Dev Alert!</b>\n\n"
+        f"<b>{token_name} (${token_symbol})</b> — latest token\n"
+        f"<code>{mint}</code>\n\n"
+        f"👤 <a href=\"{creator_url}\">Creator</a>\n"
+        f"🏆 Score: <b>{performance_score}</b> | {successful_tokens}/{total_tokens} bonded ({success_rate}%)\n"
+        f"🔗 {socials}\n\n"
+        f"{links}"
+    )
+
+
+def format_bonk_bonding_curve(mint: str, stage: str, token_name: str, token_symbol: str,
+                               creator: str, twitter_url: str, telegram_url: str,
+                               website_url: str, progress: float) -> str:
+    """
+    Formatter for bonk.fun bonding curve milestones (80% and complete).
+    """
+    if stage == "80percent":
+        header = f"🔥 <b>Bonk 80% Bonding Curve!</b>"
+    else:
+        header = f"💎 <b>Bonk 100% — Migrated to Raydium!</b>"
+
+    creator_url = f"https://solscan.io/account/{creator}" if creator else ""
+    creator_line = f'👤 <a href="{creator_url}">Creator</a>\n' if creator else ""
+    socials = _socials_line(twitter_url, telegram_url, website_url)
+
+    photon = f'<a href="https://photon-sol.tinyastro.io/en/r/@codesaga/{mint}">Photon</a>'
+    axiom = f'<a href="https://axiom.trade/t/{mint}/@codesaga">Axiom</a>'
+    dex = f'<a href="https://dexscreener.com/solana/{mint}">Dex</a>'
+    bonk = f'<a href="https://bonk.fun/token/{mint}">Bonk</a>'
+    links = f"{photon} | {axiom} | {dex} | {bonk}"
+
+    return (
+        f"{header}\n\n"
+        f"<b>{token_name} (${token_symbol})</b>\n"
+        f"<code>{mint}</code>\n\n"
+        f"📊 Progress: <b>{progress:.1f}%</b>\n"
+        f"{creator_line}"
+        f"🔗 {socials}\n\n"
+        f"{links}"
+    )
+
+
 def format_dexscreener_boost(mint: str, name: str, symbol: str, user: str, description: str,
                              twitter_url: str, telegram_url: str, website_url: str,
                              amount, signal_type: str) -> str:

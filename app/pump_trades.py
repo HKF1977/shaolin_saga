@@ -31,7 +31,7 @@ from collections import deque
 from time import time as current_time
 from rate_limiter import queue_discord_send, MessagePriority, get_message_queue, monitor_rate_limits, ensure_queue_processing, monitor_memory_usage
 from telegram_sender import queue_telegram_send, get_telegram_targets, ensure_telegram_queue_processing
-from telegram_formatter import format_whale_large_trade, format_wallet_tracker
+from telegram_formatter import format_whale_large_trade, format_wallet_tracker, format_based_dev
 
 #Get vars from config.py
 sys.path.append('/home/shaolin_saga/config')
@@ -385,6 +385,17 @@ async def process_based_dev_alerts(users):
                         channel = get_channel(server['server_id'], 'based_dev')
                         if channel:
                             await queue_discord_send(channel, embed, "based_dev", user_logger, MessagePriority.HIGH)
+
+                    mint = data['successful_tokens'][-1]['mint'] if data['successful_tokens'] else data['total_tokens'][0]
+                    tx_data = await get_saved_transaction_metadata(mint, user_logger)
+                    if tx_data:
+                        tg_text = format_based_dev(
+                            user, mint, tx_data.get('name', 'Unknown'), tx_data.get('symbol', '?'),
+                            total_tokens, successful_tokens, performance_score,
+                            tx_data.get('twitter_url'), tx_data.get('telegram_url'), tx_data.get('website_url')
+                        )
+                        for target in get_telegram_targets("based_dev"):
+                            await queue_telegram_send(target['chat_id'], target['thread_id'], tg_text, "based_dev", user_logger)
 
 
 def save_enhanced_user_data(user, data):
