@@ -207,7 +207,7 @@ async def check_tracked_wallet(user_address):
             server_id = server['server_id']
             #wallet_logger.debug(f"Tracked wallets server_id: {server_id}")
             
-            wallets_file = f'/home/shaolin_saga/data/tracked_wallets/known_wallets_{server_id}.json'
+            wallets_file = f'/home/shaolin_saga/data/pump_data/tracked_wallets/known_wallets_{server_id}.json'
 
             # Skip if file doesn't exist for this server
             if not os.path.exists(wallets_file):
