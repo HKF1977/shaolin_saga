@@ -17,15 +17,19 @@ with open('/home/shaolin_saga/config/telegram_channels.json', 'r') as f:
     _tg_config = json.load(f)
 
 
+FREE_DELAY_SECONDS = 300
+
+
 def get_telegram_targets(signal_type: str) -> list:
-    """Return list of {chat_id, thread_id} dicts for a given signal type."""
+    """Return list of {chat_id, thread_id, delay_seconds} dicts for a given signal type."""
     targets = []
     for group in _tg_config['groups']:
         thread_id = group['topics'].get(signal_type)
         if thread_id is not None:
             targets.append({
                 'chat_id': group['chat_id'],
-                'thread_id': thread_id
+                'thread_id': thread_id,
+                'delay_seconds': group.get('delay_seconds', 0)
             })
     return targets
 
@@ -148,9 +152,17 @@ def get_queue() -> TelegramQueue:
     return _queue
 
 
-async def queue_telegram_send(chat_id: str, thread_id: int, text: str, signal_type: str = "unknown", logger=None):
-    """Queue a Telegram message for sending."""
+async def _delayed_send(chat_id: str, thread_id: int, text: str, signal_type: str, logger, delay_seconds: int):
+    await asyncio.sleep(delay_seconds)
     await get_queue().add(chat_id, thread_id, text, signal_type, logger)
+
+
+async def queue_telegram_send(chat_id: str, thread_id: int, text: str, signal_type: str = "unknown", logger=None, delay_seconds: int = 0):
+    """Queue a Telegram message for sending, with optional delay in seconds."""
+    if delay_seconds > 0:
+        asyncio.create_task(_delayed_send(chat_id, thread_id, text, signal_type, logger, delay_seconds))
+    else:
+        await get_queue().add(chat_id, thread_id, text, signal_type, logger)
 
 
 async def ensure_telegram_queue_processing():

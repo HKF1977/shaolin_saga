@@ -418,7 +418,7 @@ async def handle_bonk_token_creation(decoded_data, accounts):
         # Telegram: new_bonk_tokens
         tg_text = format_new_bonk_tokens(token_data)
         for target in get_telegram_targets('new_bonk_tokens'):
-            await queue_telegram_send(target['chat_id'], target['thread_id'], tg_text, 'new_bonk_tokens', bonk_logger)
+            await queue_telegram_send(target['chat_id'], target['thread_id'], tg_text, 'new_bonk_tokens', bonk_logger, delay_seconds=target.get('delay_seconds', 0))
         
         # Console output
         print("=" * 50)

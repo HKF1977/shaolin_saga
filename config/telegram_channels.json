@@ -3,6 +3,7 @@
     {
       "name": "Shaolin Saga (Free)",
       "chat_id": "-1003759203307",
+      "delay_seconds": 300,
       "topics": {
         "all_tokens": 5,
         "new_bonk_tokens": 6,
@@ -12,7 +13,11 @@
     {
       "name": "Shaolin Saga Alpha (Premium)",
       "chat_id": "-1003838056995",
+      "delay_seconds": 0,
       "topics": {
+        "all_tokens": 2495,
+        "new_bonk_tokens": 2496,
+        "pump_livestreams": 2497,
         "new_coin_with_socials": 3,
         "80_bonding_curve": 12,
         "bonding_curve_completed": 13,

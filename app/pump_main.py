@@ -248,7 +248,7 @@ async def trigger_livestream_alert(stream_data):
     # Telegram: pump_livestreams
     tg_text = format_pump_livestream(stream_data)
     for target in get_telegram_targets('pump_livestreams'):
-        await queue_telegram_send(target['chat_id'], target['thread_id'], tg_text, 'pump_livestreams', websocket_logger)
+        await queue_telegram_send(target['chat_id'], target['thread_id'], tg_text, 'pump_livestreams', websocket_logger, delay_seconds=target.get('delay_seconds', 0))
 
 async def create_livestream_embed(stream_data):
     """Create Discord embed for new livestream"""
@@ -2245,7 +2245,7 @@ async def handle_message(data):
     # Telegram: all_tokens
     tg_text = format_all_tokens(enriched_data)
     for target in get_telegram_targets('all_tokens'):
-        await queue_telegram_send(target['chat_id'], target['thread_id'], tg_text, 'all_tokens', websocket_logger)
+        await queue_telegram_send(target['chat_id'], target['thread_id'], tg_text, 'all_tokens', websocket_logger, delay_seconds=target.get('delay_seconds', 0))
 
     # 5.
     if three_socials:
