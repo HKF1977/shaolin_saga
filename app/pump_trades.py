@@ -194,40 +194,51 @@ async def check_tracked_wallet(user_address):
         return None
 '''
 
+# In-memory cache: {server_id: {'mtime': float, 'index': {address: wallet_info}}}
+_wallet_cache = {}
+
+def _load_wallet_cache(server_id, wallets_file):
+    """Reload the wallet file into cache only if it has changed on disk."""
+    try:
+        mtime = os.path.getmtime(wallets_file)
+    except OSError:
+        return
+    cached = _wallet_cache.get(server_id)
+    if cached and cached['mtime'] == mtime:
+        return  # Still fresh
+    with open(wallets_file, 'r') as f:
+        data = json.load(f)
+    index = {
+        w['wallet']: {
+            'name': w.get('name', 'Unknown'),
+            'socials': w.get('socials', ''),
+            'wallet': w['wallet'],
+            'server_id': server_id
+        }
+        for w in data.get('wallets', [])
+        if w.get('wallet')
+    }
+    _wallet_cache[server_id] = {'mtime': mtime, 'index': index}
+    wallet_logger.info(f"Reloaded wallet cache for server {server_id}: {len(index)} wallets")
+
+
 async def check_tracked_wallet(user_address):
     """
-    Check if a wallet address is in our tracked wallets list
-    Returns the wallet data if found, None otherwise
+    Check if a wallet address is in our tracked wallets list.
+    Uses an mtime-based in-memory cache to avoid per-transaction file I/O.
+    Returns the wallet data if found, None otherwise.
     """
     try:
-        os.makedirs('/home/shaolin_saga/data/tracked_wallets', exist_ok=True)
-
-        # Loop through all server-specific wallet files
         for server in servers['allowed_servers']:
             server_id = server['server_id']
-            #wallet_logger.debug(f"Tracked wallets server_id: {server_id}")
-            
             wallets_file = f'/home/shaolin_saga/data/pump_data/tracked_wallets/known_wallets_{server_id}.json'
-
-            # Skip if file doesn't exist for this server
             if not os.path.exists(wallets_file):
                 continue
-
-            # Load and check this server's wallets
-            with open(wallets_file, 'r') as f:
-                tracked_wallets_data = json.load(f)
-
-            for wallet in tracked_wallets_data.get('wallets', []):
-                if wallet.get('wallet') == user_address:
-                    return {
-                        'name': wallet.get('name', 'Unknown'),
-                        'socials': wallet.get('socials', ''),
-                        'wallet': wallet.get('wallet'),
-                        'server_id': server_id  # Track which server owns this wallet
-                    }
-
+            _load_wallet_cache(server_id, wallets_file)
+            wallet_info = _wallet_cache.get(server_id, {}).get('index', {}).get(user_address)
+            if wallet_info:
+                return wallet_info
         return None
-
     except Exception as e:
         wallet_logger.error(f"Error checking tracked wallet {user_address}: {str(e)}")
         return None
