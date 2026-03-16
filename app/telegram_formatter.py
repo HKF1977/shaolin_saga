@@ -218,6 +218,35 @@ def format_whale_large_trade(trade_data: dict, token_name: str, token_symbol: st
     )
 
 
+def format_wallet_tracker(mint: str, token_name: str, token_symbol: str,
+                          wallet_name: str, wallet_address: str, wallet_twitter: str,
+                          trade_type: str, sol_amount: float, signature: str) -> str:
+    """
+    Formatter for tracked wallet trade alerts (wallet_tracker signal).
+    """
+    if trade_type == "BUY":
+        action_emoji = "🟢"
+        action = "Bought"
+    else:
+        action_emoji = "🔴"
+        action = "Sold"
+
+    wallet_url = f"https://solscan.io/account/{wallet_address}"
+    tx_url = f"https://solscan.io/tx/{signature}"
+    wallet_link = f'<a href="{wallet_twitter}">{wallet_name}</a>' if wallet_twitter else f'<a href="{wallet_url}">{wallet_name}</a>'
+    links = _trade_links(mint)
+
+    return (
+        f"{action_emoji} <b>Tracked Wallet — {action}!</b>\n\n"
+        f"<b>{token_name} (${token_symbol})</b>\n"
+        f"<code>{mint}</code>\n\n"
+        f"👛 {wallet_link} | <a href=\"{wallet_url}\">Solscan</a>\n"
+        f"💰 <b>{sol_amount:.2f} SOL</b> {action}\n"
+        f"🔗 <a href=\"{tx_url}\">Transaction</a>\n\n"
+        f"{links}"
+    )
+
+
 def format_dexscreener_boost(mint: str, name: str, symbol: str, user: str, description: str,
                              twitter_url: str, telegram_url: str, website_url: str,
                              amount, signal_type: str) -> str:

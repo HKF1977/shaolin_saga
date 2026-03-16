@@ -31,7 +31,7 @@ from collections import deque
 from time import time as current_time
 from rate_limiter import queue_discord_send, MessagePriority, get_message_queue, monitor_rate_limits, ensure_queue_processing, monitor_memory_usage
 from telegram_sender import queue_telegram_send, get_telegram_targets, ensure_telegram_queue_processing
-from telegram_formatter import format_whale_large_trade
+from telegram_formatter import format_whale_large_trade, format_wallet_tracker
 
 #Get vars from config.py
 sys.path.append('/home/shaolin_saga/config')
@@ -712,7 +712,15 @@ async def trigger_wallet_tracker_alert(trade_data):
             if channel:
                 await queue_discord_send(channel, embed, "wallet_tracker", wallet_logger, MessagePriority.LOW)
                 wallet_logger.info(f"Sent wallet tracker alert for {wallet_address} to server {server['server_id']}")
-    
+
+        tg_text = format_wallet_tracker(
+            mint, token_name, token_symbol,
+            wallet_name, wallet_address, twitter_url,
+            trade_type, trade_data['sol_amount'], trade_data['signature']
+        )
+        for target in get_telegram_targets("wallet_tracker"):
+            await queue_telegram_send(target['chat_id'], target['thread_id'], tg_text, "wallet_tracker", wallet_logger)
+
     except Exception as e:
         wallet_logger.error(f"Error sending wallet tracker alert: {str(e)}")
 
@@ -989,7 +997,7 @@ async def listen_and_decode_trades():
 
                         # Add validation before parsing
                         if not response or not response.strip():
-                            websocket-secondary_logger.warning("Received empty response, skipping...")
+                            websocket_secondary_logger.warning("Received empty response, skipping...")
                             continue
 
                         data = json.loads(response)
