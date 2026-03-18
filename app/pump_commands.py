@@ -1626,10 +1626,10 @@ def register_commands(bot, logger):
                     # Sort handles by date (newest first)
                     def parse_date(date_str):
                         try:
-                            return datetime.strptime(date_str, '%d-%m-%Y')
-                        except ValueError:
+                            return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                        except (ValueError, AttributeError):
                             return datetime.min  # fallback for invalid dates
-                    
+
                     handles.sort(key=lambda x: parse_date(x.get('date', '')), reverse=True)
 
                     
