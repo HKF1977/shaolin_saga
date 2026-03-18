@@ -79,10 +79,10 @@ async def get_top_holders(client: AsyncClient, mint: Pubkey, limit: int = 10, ma
             
             holders = []
             for account in response.value:
+                ui_amount = account.amount.ui_amount or 0.0
                 if logger:
-                    logger.info(f"Processing account: {account.address} with amount: {account.amount.amount}")
-                balance = int(account.amount.amount)
-                percentage = (balance / (TOTAL_SUPPLY * 1e6)) * 100
+                    logger.info(f"Processing account: {account.address} with ui_amount: {ui_amount}")
+                percentage = (ui_amount / TOTAL_SUPPLY) * 100
                 short_address = f"{str(account.address)[:6]}...{str(account.address)[-4:]}"
                 holders.append((short_address, percentage))
 
