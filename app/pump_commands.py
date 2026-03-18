@@ -1030,6 +1030,9 @@ def register_commands(bot, logger):
         await interaction.response.defer(thinking=True)
         
         try:
+            image_url = None
+            metadata_uri = None
+
             # First, check if this is a pump.fun token we already know about
             pump_token_path = f"/home/shaolin_saga/data/pump_data/metadata/{token_address}.json"
             if os.path.exists(pump_token_path):
