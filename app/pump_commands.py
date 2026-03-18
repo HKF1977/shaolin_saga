@@ -1044,13 +1044,14 @@ def register_commands(bot, logger):
                 token_name = tx_data.get('name', 'Unknown Token')
                 token_symbol = tx_data.get('symbol', 'UNKNOWN')
                 
-                if metadata_uri:
-                    # Get metadata from URI
+                # Try direct image_url first (stored in our metadata JSON)
+                image_url = tx_data.get('image_url')
+
+                # Fall back to fetching from metadata URI
+                if not image_url and metadata_uri:
                     token_data = await get_metadata(metadata_uri)
                     image_url = token_data.get('image')
-                    
                     if image_url:
-                        # Process IPFS URL if needed
                         image_url = await get_image_data(image_url)
             else:
                 # Not a pump.fun token, fetch metadata from RPC
