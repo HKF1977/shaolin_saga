@@ -8,6 +8,7 @@ import logging
 import datetime
 import os
 import sys
+import re
 import requests
 import discord
 from logging.handlers import RotatingFileHandler
@@ -38,7 +39,8 @@ BONK_PROGRAM = "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj"
 BONK_CREATE_DISCRIMINATORS = {
     "afaf6d1f0d989bed",
     "0b28a58f15000000",
-    "4399af27da102620"
+    "4399af27da102620",
+    "25be7ede2c9aab11"
 }
 
 
@@ -271,12 +273,21 @@ def extract_bonk_accounts(accounts):
                 mint_address = account
                 break
 
-        # Fallback: j7tracker.io and similar tools use a plain keypair at index 3
+        # Fallback: no vanity suffix — use position based on account count
+        # ~18 accounts = standard bonk.fun structure (mint at index 6)
+        # ~10 accounts = medium structure (mint at index 4)
+        # ~11 accounts = j7tracker/short structure (mint at index 3)
         if not mint_address:
-            if len(accounts) > 3:
-                mint_address = accounts[3]
-                bonk_logger.info(f"🔍 No 'bonk' vanity mint found, using accounts[3] as mint: {mint_address}")
+            if len(accounts) >= 15:
+                mint_address = accounts[6] if len(accounts) > 6 else None
+                bonk_logger.info(f"🔍 No 'bonk' vanity mint, standard structure ({len(accounts)} accounts) — using accounts[6]: {mint_address}")
+            elif len(accounts) >= 9:
+                mint_address = accounts[4] if len(accounts) > 4 else None
+                bonk_logger.info(f"🔍 No 'bonk' vanity mint, medium structure ({len(accounts)} accounts) — using accounts[4]: {mint_address}")
             else:
+                mint_address = accounts[3] if len(accounts) > 3 else None
+                bonk_logger.info(f"🔍 No 'bonk' vanity mint, short structure ({len(accounts)} accounts) — using accounts[3]: {mint_address}")
+            if not mint_address:
                 bonk_logger.error("Could not determine mint address")
                 return {}
 
@@ -310,19 +321,24 @@ def extract_bonk_accounts(accounts):
 
         # Skip first 2 accounts (creator duplicates), then filter out known accounts
         filtered_accounts = []
-        for i, account in enumerate(accounts[2:], start=2):
+        for account in accounts[2:]:
             if account not in known_accounts:
                 filtered_accounts.append(account)
 
         bonk_logger.info(f"🔍 Filtered accounts: {filtered_accounts}")
 
-        if mint_address.lower().endswith('bonk'):
-            # Standard bonk.fun UI pattern
+        if len(accounts) >= 15 or mint_address.lower().endswith('bonk'):
+            # Standard bonk.fun structure — bonding curve at filtered[1]
             account_mapping['raydium_market'] = filtered_accounts[0] if len(filtered_accounts) > 0 else None
             account_mapping['raydium_pool_1'] = filtered_accounts[1] if len(filtered_accounts) > 1 else None
             account_mapping['bonding_curve'] = filtered_accounts[1] if len(filtered_accounts) > 1 else None
+        elif len(accounts) >= 9:
+            # Medium structure (10 accounts) — bonding curve at accounts[3]
+            account_mapping['raydium_market'] = accounts[3] if len(accounts) > 3 else None
+            account_mapping['raydium_pool_1'] = accounts[3] if len(accounts) > 3 else None
+            account_mapping['bonding_curve'] = accounts[3] if len(accounts) > 3 else None
         else:
-            # j7tracker / plain keypair pattern — bonding curve at accounts[4]
+            # Short structure (j7tracker) — bonding curve at accounts[4]
             account_mapping['raydium_market'] = accounts[4] if len(accounts) > 4 else None
             account_mapping['raydium_pool_1'] = accounts[4] if len(accounts) > 4 else None
             account_mapping['bonding_curve'] = accounts[4] if len(accounts) > 4 else None
