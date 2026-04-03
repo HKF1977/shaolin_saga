@@ -264,26 +264,33 @@ def decode_bonk_create_instruction(ix_data):
 def extract_bonk_accounts(accounts):
     """Extract key accounts from Bonk token creation transaction"""
     try:
-        # Find the real mint (ends with 'bonk')
+        # Find the real mint - first try 'bonk' vanity suffix (bonk.fun UI pattern)
         mint_address = None
         for account in accounts:
             if account.lower().endswith('bonk'):
                 mint_address = account
                 break
-        
+
+        # Fallback: j7tracker.io and similar tools use a plain keypair at index 3
         if not mint_address:
-            bonk_logger.error("No mint address ending with 'bonk' found")
-            return {}
-        
+            if len(accounts) > 3:
+                mint_address = accounts[3]
+                bonk_logger.info(f"🔍 No 'bonk' vanity mint found, using accounts[3] as mint: {mint_address}")
+            else:
+                bonk_logger.error("Could not determine mint address")
+                return {}
+
+        creator = accounts[0] if len(accounts) > 0 else None
+
         # Based on your analysis:
         account_mapping = {
-            'creator': accounts[0] if len(accounts) > 0 else None,  # Developer/creator
-            'mint': mint_address,  # The one ending with 'bonk'
-            'bonding_curve': None,  # We need to find this
-            'raydium_launchpad_auth': accounts[4] if len(accounts) > 4 else None,  # WLHv2UAZm6z4KyaaELi5pjdbJh6RESMva1Rnn8pJVVh
+            'creator': creator,
+            'mint': mint_address,
+            'bonding_curve': None,
+            'raydium_launchpad_auth': accounts[4] if len(accounts) > 4 else None,
             'raydium_market': None
         }
-        
+
         # Find bonding curve - look for the account that's not a known system account
         known_accounts = {
             'So11111111111111111111111111111111111111112',  # SOL
@@ -296,24 +303,32 @@ def extract_bonk_accounts(accounts):
             '6s1xP3hpbAfFoNtUNF8mfHsjr2Bd97JxFJRWLbL6aHuX',  # Raydium (ants coin)
             'FfYek5vEz23cMkWsdJwG2oa6EphsvXSHrGpdALN4g6W1',  # Bonk platform config
             'WLHv2UAZm6z4KyaaELi5pjdbJh6RESMva1Rnn8pJVVh',  # Raydium auth
-            'BuM6KDpWiTcxvrpXywWFiw45R2RNH8WURdvqoTDV1BW4', # Bonkfun Platfrom Config
-            account_mapping['creator'],  # Creator
-            mint_address,  # Mint
+            'BuM6KDpWiTcxvrpXywWFiw45R2RNH8WURdvqoTDV1BW4', # Bonkfun Platform Config
+            creator,
+            mint_address,
         }
 
         # Skip first 2 accounts (creator duplicates), then filter out known accounts
         filtered_accounts = []
-        for i, account in enumerate(accounts[2:], start=2):  # Start from index 2
+        for i, account in enumerate(accounts[2:], start=2):
             if account not in known_accounts:
                 filtered_accounts.append(account)
-        
+
         bonk_logger.info(f"🔍 Filtered accounts: {filtered_accounts}")
-        
-        account_mapping['raydium_market'] = filtered_accounts[0] if len(filtered_accounts) > 0 else None  # Raydium Market 
-        account_mapping['raydium_pool_1'] = filtered_accounts[1] if len(filtered_accounts) > 1 else None  # Raydium pool 1 
-        account_mapping['bonding_curve'] = filtered_accounts[1] if len(filtered_accounts) > 1 else None  # Bonk bonding curve 
+
+        if mint_address.lower().endswith('bonk'):
+            # Standard bonk.fun UI pattern
+            account_mapping['raydium_market'] = filtered_accounts[0] if len(filtered_accounts) > 0 else None
+            account_mapping['raydium_pool_1'] = filtered_accounts[1] if len(filtered_accounts) > 1 else None
+            account_mapping['bonding_curve'] = filtered_accounts[1] if len(filtered_accounts) > 1 else None
+        else:
+            # j7tracker / plain keypair pattern — bonding curve at accounts[4]
+            account_mapping['raydium_market'] = accounts[4] if len(accounts) > 4 else None
+            account_mapping['raydium_pool_1'] = accounts[4] if len(accounts) > 4 else None
+            account_mapping['bonding_curve'] = accounts[4] if len(accounts) > 4 else None
+
         bonk_logger.info(f"🔍 Final accounts: {account_mapping}")
-        
+
         return account_mapping
         
 
