@@ -1135,6 +1135,7 @@ async def listen_and_decode_trades():
                             "no close frame sent",
                             "connection closed",
                             "1011",
+                            "1001",
                             "1006",
                             "connection lost"
                         ]

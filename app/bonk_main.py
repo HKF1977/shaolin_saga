@@ -617,6 +617,7 @@ async def listen_for_bonk_tokens():
                             "no close frame sent",
                             "connection closed",
                             "1011",
+                            "1001",
                             "1006",
                             "connection lost"
                         ]

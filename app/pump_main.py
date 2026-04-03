@@ -2413,15 +2413,21 @@ async def listen_and_decode_create():
                                                         #websocket_logger.info(f"Pump discriminator: {discriminator}")
                                                         if discriminator in create_discriminators:
                                                             create_ix = next(instr for instr in idl['instructions'] if instr['name'] == 'create')
-
-                                                            # Add validation here
-                                                            if all(index < len(transaction.message.account_keys) for index in ix.accounts):
-                                                                account_keys = [str(transaction.message.account_keys[index]) for index in ix.accounts]
+                                                            try:
+                                                                n_keys = len(transaction.message.account_keys)
+                                                                account_keys = [
+                                                                    str(transaction.message.account_keys[i]) if i < n_keys else None
+                                                                    for i in ix.accounts
+                                                                ]
                                                                 decoded_args = decode_create_instruction(ix_data, create_ix, account_keys)
+                                                                if not decoded_args.get('user') or decoded_args['user'] == 'None':
+                                                                    decoded_args['user'] = str(transaction.message.account_keys[0])
                                                                 await handle_message(decoded_args)
                                                                 #websocket_logger.info(f"PUMP TOKEN CREATED")
                                                                 print(json.dumps(decoded_args, indent=2))
                                                                 print("--------------------")
+                                                            except Exception as e:
+                                                                websocket_logger.error(f"Failed to decode/handle create (discriminator {discriminator}): {e}", exc_info=True)
 
                         elif 'result' in data:
                             websocket_logger.info("Subscription confirmed")
@@ -2457,6 +2463,7 @@ async def listen_and_decode_create():
                             "no close frame sent",
                             "connection closed",
                             "1011",
+                            "1001",
                             "1006",
                             "connection lost"
                         ]

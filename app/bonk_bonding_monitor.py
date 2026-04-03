@@ -368,7 +368,7 @@ async def create_bonk_bonding_embed(bonding_curve_address, token_mint, stage, ac
         token_name = token_data.get('name', 'Unknown')
         token_symbol = token_data.get('symbol', 'Unknown')
         image_url = token_data.get('image_url')
-        description = token_data.get('description')
+        description = token_data.get('description') or 'No Description Added'
         website_url = token_data.get('website_url')
         twitter_url = token_data.get('twitter_url')
         telegram_url = token_data.get('telegram_url')
@@ -377,14 +377,14 @@ async def create_bonk_bonding_embed(bonding_curve_address, token_mint, stage, ac
         token_name = 'Unknown'
         token_symbol = 'Unknown'
         image_url = None
-        description = None
+        description = 'No Description Added'
         twitter_url = None
         telegram_url = None
         website_url = None
         user = None
     
     contract_uri = f'https://bonk.fun/token/{token_mint}'
-    creator_uri = 'https://solscan.io/account/' + user
+    creator_uri = 'https://solscan.io/account/' + (user or 'Unknown')
 
     # Set stage-specific text
     if stage == "80percent":
