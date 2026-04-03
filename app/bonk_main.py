@@ -452,12 +452,14 @@ async def process_transaction(tx_data_decoded, signature=None):
         for ix_idx, ix in enumerate(transaction.message.instructions):
             program_idx = ix.program_id_index
             program_id = str(transaction.message.account_keys[program_idx])
-            
+
             if program_id == BONK_PROGRAM:
                 ix_data = bytes(ix.data)
                 if len(ix_data) >= 8:
                     discriminator_hex = ix_data[:8].hex()
-                    
+                    accounts_preview = [str(transaction.message.account_keys[idx]) for idx in ix.accounts if idx < len(transaction.message.account_keys)]
+                    bonk_logger.info(f"🔍 BONK ix [{ix_idx}] discriminator={discriminator_hex} accounts={accounts_preview}")
+
                     if discriminator_hex in BONK_CREATE_DISCRIMINATORS:
                         bonk_logger.info(f"🎯 Token creation discriminator found: {discriminator_hex}")
                         # Decode the instruction

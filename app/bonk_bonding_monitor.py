@@ -211,7 +211,7 @@ async def process_bonk_bonding_curve(bonding_curve_address, token_mint):
                 
                 for directory in directories:
                     file_path = f"{directory}/{token_mint}.json"
-                    if safe_file_delete(file_path, logger=bonk_bonding_logger):
+                    if safe_file_exists(file_path) and safe_file_delete(file_path, logger=bonk_bonding_logger):
                         bonk_bonding_logger.info(f"Removed dead bonk token file: {file_path}")
                 return
 
