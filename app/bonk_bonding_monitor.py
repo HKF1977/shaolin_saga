@@ -78,9 +78,9 @@ def decode_bonding_curve_data(hex_data: str) -> dict:
         token_balance_raw = struct.unpack('<Q', data[token_balance_offset:token_balance_offset+8])[0]
         
         # Convert to human readable tokens 
-        tokens_remaining = token_balance_raw / (10 ** 6)  # Changed from 10^9 to 10^6
-        
-        #bonk_bonding_logger.debug(f"🔍 DECODER: Tokens remaining: {tokens_remaining:,.0f}")
+        tokens_remaining = token_balance_raw / 1e6
+        if tokens_remaining > BONK_TOTAL_SUPPLY:
+            tokens_remaining = token_balance_raw / 1e9
         
         # Calculate progress
         # Progress = (tokens_sold / total_supply) * 100
