@@ -128,20 +128,21 @@ async def get_bonding_curve_data(client, bonding_curve_address):
         if not response.value or not response.value.data:
             bonk_bonding_logger.warning(f"No data for bonding curve account {bonding_curve_address}")
             return None
-            
+
         # Convert account data to hex and decode
         hex_data = response.value.data.hex()
         curve_data = decode_bonding_curve_data(hex_data)
-        
+
         if not curve_data.get("success"):
             bonk_bonding_logger.error(f"Failed to decode bonding curve data: {curve_data.get('error')}")
-            return None
-            
+            raise ValueError(f"Decode failed for {bonding_curve_address}: {curve_data.get('error')}")
+
         return curve_data
-        
-    except Exception as e:
-        bonk_bonding_logger.error(f"Error getting bonding curve data for {bonding_curve_address}: {e}")
-        return None
+
+    except Exception:
+        # Re-raise so process_bonk_bonding_curve can distinguish RPC/decode errors
+        # from a genuinely missing account (None return above)
+        raise
 
 
 def save_bonk_bonding_curve_state(curve_data, token_mint, directory, notification_status=None):
@@ -221,6 +222,19 @@ async def process_bonk_bonding_curve(bonding_curve_address, token_mint):
 
         tokens_remaining = curve_data["raw_data"]["tokens_remaining"]
 
+        # Pool empty → bonding complete regardless of saved supply
+        if tokens_remaining == 0:
+            bonk_bonding_logger.info(f"🔴 Bonk {token_mint} pool is empty — treating as complete")
+            calc_values = {'tokens_remaining': 0, 'tokens_sold': 0, 'progress_percentage': 100}
+            notification_status = {'total_supply': 0, 'notified_complete': True,
+                                   'bondingCurve': str(bonding_curve_address), 'mint': token_mint, 'progress': 100}
+            save_bonk_bonding_curve_state(curve_data, token_mint, "bondingComplete", notification_status)
+            file_path = f"/home/shaolin_saga/data/bonk_data/bonk_bondingComplete/{token_mint}.json"
+            existing_data = safe_json_read(file_path, default={}, logger=bonk_bonding_logger)
+            if not existing_data.get('notified_complete', False):
+                await trigger_bonk_discord_alert(bonding_curve_address, token_mint, "complete", 100, calc_values)
+            return
+
         # Resolve actual total supply — check state files for a previously saved value,
         # falling back to tokens_remaining on first observation (pool holds full supply at launch)
         total_supply = None
@@ -232,13 +246,17 @@ async def process_bonk_bonding_curve(bonding_curve_address, token_mint):
         ]:
             check_path = f"/home/shaolin_saga/data/bonk_data/{check_dir}/{token_mint}.json"
             existing = safe_json_read(check_path, default={}, logger=bonk_bonding_logger)
-            if existing.get('total_supply'):
+            if existing.get('total_supply') is not None:
                 total_supply = existing['total_supply']
                 break
 
         if total_supply is None:
             total_supply = tokens_remaining
             bonk_bonding_logger.info(f"🔍 First observation of {token_mint}, initial supply: {total_supply:,.0f}")
+        elif tokens_remaining > total_supply:
+            # Stale/wrong saved supply — reset to current observation
+            bonk_bonding_logger.warning(f"⚠️ {token_mint} tokens_remaining ({tokens_remaining:,.0f}) > saved total_supply ({total_supply:,.0f}), resetting supply")
+            total_supply = tokens_remaining
 
         tokens_sold = max(0, total_supply - tokens_remaining)
         actual_progress = (tokens_sold / total_supply * 100) if total_supply > 0 else 0
