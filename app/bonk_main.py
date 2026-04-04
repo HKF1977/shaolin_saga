@@ -273,20 +273,33 @@ def extract_bonk_accounts(accounts):
                 mint_address = account
                 break
 
-        # Fallback: no vanity suffix — use position based on account count
-        # ~18 accounts = standard bonk.fun structure (mint at index 6)
-        # ~10 accounts = medium structure (mint at index 4)
-        # ~11 accounts = j7tracker/short structure (mint at index 3)
+        # Fallback: no vanity suffix — detect structure by accounts[2]
+        # Standard (~18 accounts): many known system accounts, mint at index 6
+        # accounts[2] is a known system account (~10 accounts): mint shifts to index 4, bonding curve at 3
+        # accounts[2] is unknown (~11 accounts, j7tracker): mint at index 3, bonding curve at 4
+        SYSTEM_ACCOUNTS = {
+            'So11111111111111111111111111111111111111112',
+            'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
+            'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s',
+            '11111111111111111111111111111111',
+            'SysvarRent111111111111111111111111111111111',
+            '2DPAtwB8L12vrMRExbLuyGnC7n2J5LNoZQSejeQGpwkr',
+            'LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj',
+            '6s1xP3hpbAfFoNtUNF8mfHsjr2Bd97JxFJRWLbL6aHuX',
+            'FfYek5vEz23cMkWsdJwG2oa6EphsvXSHrGpdALN4g6W1',
+            'WLHv2UAZm6z4KyaaELi5pjdbJh6RESMva1Rnn8pJVVh',
+            'BuM6KDpWiTcxvrpXywWFiw45R2RNH8WURdvqoTDV1BW4',
+        }
         if not mint_address:
             if len(accounts) >= 15:
                 mint_address = accounts[6] if len(accounts) > 6 else None
                 bonk_logger.info(f"🔍 No 'bonk' vanity mint, standard structure ({len(accounts)} accounts) — using accounts[6]: {mint_address}")
-            elif len(accounts) >= 9:
+            elif len(accounts) > 2 and accounts[2] in SYSTEM_ACCOUNTS:
                 mint_address = accounts[4] if len(accounts) > 4 else None
-                bonk_logger.info(f"🔍 No 'bonk' vanity mint, medium structure ({len(accounts)} accounts) — using accounts[4]: {mint_address}")
+                bonk_logger.info(f"🔍 No 'bonk' vanity mint, accounts[2] is system account ({len(accounts)} accounts) — using accounts[4]: {mint_address}")
             else:
                 mint_address = accounts[3] if len(accounts) > 3 else None
-                bonk_logger.info(f"🔍 No 'bonk' vanity mint, short structure ({len(accounts)} accounts) — using accounts[3]: {mint_address}")
+                bonk_logger.info(f"🔍 No 'bonk' vanity mint, accounts[2] is unknown ({len(accounts)} accounts) — using accounts[3]: {mint_address}")
             if not mint_address:
                 bonk_logger.error("Could not determine mint address")
                 return {}
@@ -332,13 +345,13 @@ def extract_bonk_accounts(accounts):
             account_mapping['raydium_market'] = filtered_accounts[0] if len(filtered_accounts) > 0 else None
             account_mapping['raydium_pool_1'] = filtered_accounts[1] if len(filtered_accounts) > 1 else None
             account_mapping['bonding_curve'] = filtered_accounts[1] if len(filtered_accounts) > 1 else None
-        elif len(accounts) >= 9:
-            # Medium structure (10 accounts) — bonding curve at accounts[3]
+        elif len(accounts) > 2 and accounts[2] in SYSTEM_ACCOUNTS:
+            # accounts[2] is a system account — bonding curve at accounts[3], mint already at [4]
             account_mapping['raydium_market'] = accounts[3] if len(accounts) > 3 else None
             account_mapping['raydium_pool_1'] = accounts[3] if len(accounts) > 3 else None
             account_mapping['bonding_curve'] = accounts[3] if len(accounts) > 3 else None
         else:
-            # Short structure (j7tracker) — bonding curve at accounts[4]
+            # accounts[2] is unknown — mint at [3], bonding curve at [4]
             account_mapping['raydium_market'] = accounts[4] if len(accounts) > 4 else None
             account_mapping['raydium_pool_1'] = accounts[4] if len(accounts) > 4 else None
             account_mapping['bonding_curve'] = accounts[4] if len(accounts) > 4 else None
@@ -398,6 +411,7 @@ async def handle_bonk_token_creation(decoded_data, accounts):
             'accounts': accounts,
             'account_mapping': account_info,  # Include the mapping for debugging
             'timestamp': datetime.datetime.now().isoformat(),
+            'created': time.time(),
             'bonk_url': f'https://bonk.fun/{mint_address}'
         }
       

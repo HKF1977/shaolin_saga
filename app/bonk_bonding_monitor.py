@@ -359,6 +359,21 @@ async def trigger_bonk_discord_alert(bonding_curve_address, token_mint, stage, a
             for target in get_telegram_targets(tg_signal):
                 await queue_telegram_send(target['chat_id'], target['thread_id'], tg_text, tg_signal, bonk_bonding_logger)
 
+def calculate_time_to_bonding(created_timestamp: float) -> str:
+    """Calculate time elapsed from token creation to bonding milestone"""
+    elapsed_seconds = time.time() - created_timestamp
+    
+    hours = int(elapsed_seconds // 3600)
+    minutes = int((elapsed_seconds % 3600) // 60)
+    seconds = int(elapsed_seconds % 60)
+    
+    if hours > 0:
+        return f"{hours}h {minutes}m {seconds}s"
+    elif minutes > 0:
+        return f"{minutes}m {seconds}s"
+    else:
+        return f"{seconds}s"
+
 async def create_bonk_bonding_embed(bonding_curve_address, token_mint, stage, actual_progress, calc_values):
     """Create Discord embed for bonk bonding curve alerts"""
     # Get token data
@@ -382,7 +397,12 @@ async def create_bonk_bonding_embed(bonding_curve_address, token_mint, stage, ac
         telegram_url = None
         website_url = None
         user = None
+
+    if token_data and 'created' in token_data:
+        time_to_bonding = calculate_time_to_bonding(token_data['created'])
+    bonk_bonding_logger.debug(f"time_to_bonding: {time_to_bonding}")
     
+
     contract_uri = f'https://bonk.fun/token/{token_mint}'
     creator_uri = 'https://solscan.io/account/' + (user or 'Unknown')
 
