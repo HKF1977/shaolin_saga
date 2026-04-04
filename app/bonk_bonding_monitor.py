@@ -224,10 +224,13 @@ async def process_bonk_bonding_curve(bonding_curve_address, token_mint):
         # Resolve actual total supply — check state files for a previously saved value,
         # falling back to tokens_remaining on first observation (pool holds full supply at launch)
         total_supply = None
-        for check_dir in ['active_bonk_tokens', 'bonk_under80', 'bonk_80percent', 'bonk_95percent']:
-            check_path = f"/home/shaolin_saga/data/bonk_data/bonk_{check_dir}/{token_mint}.json" \
-                if check_dir != 'active_bonk_tokens' \
-                else f"/home/shaolin_saga/data/bonk_data/active_bonk_tokens/{token_mint}.json"
+        for check_dir in [
+            'active_bonk_tokens',
+            'bonk_under80',
+            'bonk_80percent',
+            'bonk_95percent',
+        ]:
+            check_path = f"/home/shaolin_saga/data/bonk_data/{check_dir}/{token_mint}.json"
             existing = safe_json_read(check_path, default={}, logger=bonk_bonding_logger)
             if existing.get('total_supply'):
                 total_supply = existing['total_supply']
