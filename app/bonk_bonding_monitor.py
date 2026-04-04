@@ -219,35 +219,57 @@ async def process_bonk_bonding_curve(bonding_curve_address, token_mint):
             bonk_bonding_logger.error(f"Error processing bonk curve {bonding_curve_address}: {e}")
             return
 
-        calc_values = curve_data["calculated_values"]
-        actual_progress = calc_values['progress_percentage']
-        
-        bonk_bonding_logger.debug(f"🔍 {token_mint} progress: {actual_progress:.2f}%, tokens remaining: {calc_values['tokens_remaining']:,.0f}")
-        
+        tokens_remaining = curve_data["raw_data"]["tokens_remaining"]
+
+        # Resolve actual total supply — check state files for a previously saved value,
+        # falling back to tokens_remaining on first observation (pool holds full supply at launch)
+        total_supply = None
+        for check_dir in ['active_bonk_tokens', 'bonk_under80', 'bonk_80percent', 'bonk_95percent']:
+            check_path = f"/home/shaolin_saga/data/bonk_data/bonk_{check_dir}/{token_mint}.json" \
+                if check_dir != 'active_bonk_tokens' \
+                else f"/home/shaolin_saga/data/bonk_data/active_bonk_tokens/{token_mint}.json"
+            existing = safe_json_read(check_path, default={}, logger=bonk_bonding_logger)
+            if existing.get('total_supply'):
+                total_supply = existing['total_supply']
+                break
+
+        if total_supply is None:
+            total_supply = tokens_remaining
+            bonk_bonding_logger.info(f"🔍 First observation of {token_mint}, initial supply: {total_supply:,.0f}")
+
+        tokens_sold = max(0, total_supply - tokens_remaining)
+        actual_progress = (tokens_sold / total_supply * 100) if total_supply > 0 else 0
+        actual_progress = min(100, actual_progress)
+
+        bonk_bonding_logger.debug(f"🔍 {token_mint} progress: {actual_progress:.2f}%, tokens remaining: {tokens_remaining:,.0f}, total supply: {total_supply:,.0f}")
+
         creator_info = None
 
-        # Initialize notification status
-        notification_status = {}
+        # Initialize notification status — always persist total_supply so future cycles use it
+        notification_status = {'total_supply': total_supply}
 
-        # Use actual_progress instead of progress for threshold checks
+        calc_values = {
+            'tokens_remaining': tokens_remaining,
+            'tokens_sold': tokens_sold,
+            'progress_percentage': actual_progress,
+        }
+
         if actual_progress >= 80 and actual_progress < 95:
             bonk_bonding_logger.info(f"🟡 Bonk {token_mint} hit 80% threshold! ({actual_progress:.1f}%)")
-            bonk_bonding_logger.info(f"   Tokens remaining: {calc_values['tokens_remaining']:,.0f}")
-            bonk_bonding_logger.info(f"   Tokens sold: {calc_values['tokens_sold']:,.0f}")
-            
-            # Check if we've already notified for 80%
+            bonk_bonding_logger.info(f"   Tokens remaining: {tokens_remaining:,.0f}")
+            bonk_bonding_logger.info(f"   Tokens sold: {tokens_sold:,.0f}")
+
             file_path = f"/home/shaolin_saga/data/bonk_data/bonk_80percent/{token_mint}.json"
             existing_data = safe_json_read(file_path, default={}, logger=bonk_bonding_logger)
             already_notified = existing_data.get('notified_80percent', False)
-            
 
             notification_status['notified_80percent'] = True
             notification_status['bondingCurve'] = str(bonding_curve_address)
             if creator_info:
                 notification_status['creator'] = creator_info
             notification_status['mint'] = token_mint
-            notification_status['progress'] = actual_progress  # Use actual_progress
-            
+            notification_status['progress'] = actual_progress
+
             save_bonk_bonding_curve_state(curve_data, token_mint, "80percent", notification_status)
 
             if not already_notified:
@@ -255,10 +277,9 @@ async def process_bonk_bonding_curve(bonding_curve_address, token_mint):
 
         elif actual_progress >= 95 and actual_progress < 100:
             bonk_bonding_logger.info(f"🟠 Bonk {token_mint} hit 95% threshold! ({actual_progress:.1f}%)")
-            bonk_bonding_logger.info(f"   Tokens remaining: {calc_values['tokens_remaining']:,.0f}")
-            bonk_bonding_logger.info(f"   Tokens sold: {calc_values['tokens_sold']:,.0f}")
-            
-            # Check if we've already notified for 95%
+            bonk_bonding_logger.info(f"   Tokens remaining: {tokens_remaining:,.0f}")
+            bonk_bonding_logger.info(f"   Tokens sold: {tokens_sold:,.0f}")
+
             file_path = f"/home/shaolin_saga/data/bonk_data/bonk_95percent/{token_mint}.json"
             existing_data = safe_json_read(file_path, default={}, logger=bonk_bonding_logger)
             already_notified = existing_data.get('notified_95percent', False)
@@ -268,39 +289,37 @@ async def process_bonk_bonding_curve(bonding_curve_address, token_mint):
             if creator_info:
                 notification_status['creator'] = creator_info
             notification_status['mint'] = token_mint
-            notification_status['progress'] = actual_progress  # Use actual_progress
-            
+            notification_status['progress'] = actual_progress
+
             save_bonk_bonding_curve_state(curve_data, token_mint, "95percent", notification_status)
             if not already_notified:
                 await trigger_bonk_discord_alert(bonding_curve_address, token_mint, "95percent", actual_progress, calc_values)
 
-        elif actual_progress >= 100 or calc_values.get('is_complete', False):
+        elif actual_progress >= 100:
             bonk_bonding_logger.info(f"🔴 Bonk {token_mint} completed bonding curve! ({actual_progress:.1f}%)")
-            bonk_bonding_logger.info(f"   Final tokens remaining: {calc_values['tokens_remaining']:,.0f}")
-            bonk_bonding_logger.info(f"   Total tokens sold: {calc_values['tokens_sold']:,.0f}")
-            
-            # Check if we've already notified for completion
+            bonk_bonding_logger.info(f"   Final tokens remaining: {tokens_remaining:,.0f}")
+            bonk_bonding_logger.info(f"   Total tokens sold: {tokens_sold:,.0f}")
+
             file_path = f"/home/shaolin_saga/data/bonk_data/bonk_bondingComplete/{token_mint}.json"
             existing_data = safe_json_read(file_path, default={}, logger=bonk_bonding_logger)
             already_notified = existing_data.get('notified_complete', False)
-
 
             notification_status['notified_complete'] = True
             notification_status['bondingCurve'] = str(bonding_curve_address)
             if creator_info:
                 notification_status['creator'] = creator_info
             notification_status['mint'] = token_mint
-            notification_status['progress'] = actual_progress  # Use actual_progress
-            
+            notification_status['progress'] = actual_progress
+
             save_bonk_bonding_curve_state(curve_data, token_mint, "bondingComplete", notification_status)
-            
+
             if not already_notified:
                 await trigger_bonk_discord_alert(bonding_curve_address, token_mint, "complete", actual_progress, calc_values)
 
         else:
             bonk_bonding_logger.debug(f"⚪ Bonk {token_mint} still under 80% ({actual_progress:.1f}%)")
-            bonk_bonding_logger.debug(f"   Tokens remaining: {calc_values['tokens_remaining']:,.0f}")
-            bonk_bonding_logger.debug(f"   Tokens sold: {calc_values['tokens_sold']:,.0f}")
+            bonk_bonding_logger.debug(f"   Tokens remaining: {tokens_remaining:,.0f}")
+            bonk_bonding_logger.debug(f"   Tokens sold: {tokens_sold:,.0f}")
             
             # Save state for under80
             notification_status['bondingCurve'] = str(bonding_curve_address)
