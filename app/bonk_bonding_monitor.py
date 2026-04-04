@@ -77,31 +77,36 @@ def decode_bonding_curve_data(hex_data: str) -> dict:
         token_balance_offset = 64
         token_balance_raw = struct.unpack('<Q', data[token_balance_offset:token_balance_offset+8])[0]
         
-        # Convert to human readable tokens 
+        # Convert to human readable tokens
         tokens_remaining = token_balance_raw / 1e6
         if tokens_remaining > BONK_TOTAL_SUPPLY:
+            # 9-decimal token (e.g. 10M supply) — total supply unknown, handle in caller
             tokens_remaining = token_balance_raw / 1e9
-        
-        # Calculate progress
-        # Progress = (tokens_sold / total_supply) * 100
-        # tokens_sold = total_supply - tokens_remaining
-        tokens_sold = BONK_TOTAL_SUPPLY - tokens_remaining
-        progress_percentage = (tokens_sold / BONK_TOTAL_SUPPLY) * 100
-        progress_percentage = max(0, min(100, progress_percentage))
-        
-        
+            total_supply = None
+        else:
+            total_supply = BONK_TOTAL_SUPPLY
+
+        if total_supply is not None:
+            tokens_sold = total_supply - tokens_remaining
+            progress_percentage = (tokens_sold / total_supply) * 100
+            progress_percentage = max(0, min(100, progress_percentage))
+        else:
+            tokens_sold = None
+            progress_percentage = None
+
         return {
             "success": True,
             "platform": "Bonk.fun (Raydium Launchpad)",
             "raw_data": {
                 "token_balance_raw": token_balance_raw,
-                "tokens_remaining": tokens_remaining
+                "tokens_remaining": tokens_remaining,
+                "total_supply": total_supply,
             },
             "calculated_values": {
                 "progress_percentage": progress_percentage,
                 "tokens_remaining": tokens_remaining,
                 "tokens_sold": tokens_sold,
-                "is_complete": progress_percentage >= 100
+                "is_complete": progress_percentage >= 100 if progress_percentage is not None else False,
             }
         }
         
@@ -220,60 +225,45 @@ async def process_bonk_bonding_curve(bonding_curve_address, token_mint):
             bonk_bonding_logger.error(f"Error processing bonk curve {bonding_curve_address}: {e}")
             return
 
-        tokens_remaining = curve_data["raw_data"]["tokens_remaining"]
+        raw = curve_data["raw_data"]
+        tokens_remaining = raw["tokens_remaining"]
+        decoder_total_supply = raw["total_supply"]  # None for 9-decimal/10M tokens
+        calc_values = curve_data["calculated_values"]
+        actual_progress = calc_values["progress_percentage"]
 
-        # Pool empty → bonding complete regardless of saved supply
+        # 9-decimal (10M supply) edge case — decoder couldn't compute progress,
+        # fall back to first-observation total_supply stored in state files
+        if decoder_total_supply is None:
+            saved_supply = None
+            for check_dir in ['active_bonk_tokens', 'bonk_under80', 'bonk_80percent', 'bonk_95percent']:
+                check_path = f"/home/shaolin_saga/data/bonk_data/{check_dir}/{token_mint}.json"
+                existing = safe_json_read(check_path, default={}, logger=bonk_bonding_logger)
+                if existing.get('total_supply') is not None:
+                    saved_supply = existing['total_supply']
+                    break
+            if saved_supply is None:
+                saved_supply = tokens_remaining
+                bonk_bonding_logger.info(f"🔍 Low-supply token {token_mint}, first observation: {saved_supply:,.0f}")
+            total_supply = max(saved_supply, tokens_remaining)
+            tokens_sold = max(0, total_supply - tokens_remaining)
+            actual_progress = (tokens_sold / total_supply * 100) if total_supply > 0 else 0
+            actual_progress = min(100, actual_progress)
+            calc_values = {'tokens_remaining': tokens_remaining, 'tokens_sold': tokens_sold, 'progress_percentage': actual_progress}
+        else:
+            total_supply = decoder_total_supply
+
+        # Pool empty → bonding complete
         if tokens_remaining == 0:
-            bonk_bonding_logger.info(f"🔴 Bonk {token_mint} pool is empty — treating as complete")
-            calc_values = {'tokens_remaining': 0, 'tokens_sold': 0, 'progress_percentage': 100}
-            notification_status = {'total_supply': 0, 'notified_complete': True,
-                                   'bondingCurve': str(bonding_curve_address), 'mint': token_mint, 'progress': 100}
-            save_bonk_bonding_curve_state(curve_data, token_mint, "bondingComplete", notification_status)
-            file_path = f"/home/shaolin_saga/data/bonk_data/bonk_bondingComplete/{token_mint}.json"
-            existing_data = safe_json_read(file_path, default={}, logger=bonk_bonding_logger)
-            if not existing_data.get('notified_complete', False):
-                await trigger_bonk_discord_alert(bonding_curve_address, token_mint, "complete", 100, calc_values)
-            return
+            actual_progress = 100
+            calc_values['progress_percentage'] = 100
 
-        # Resolve actual total supply — check state files for a previously saved value,
-        # falling back to tokens_remaining on first observation (pool holds full supply at launch)
-        total_supply = None
-        for check_dir in [
-            'active_bonk_tokens',
-            'bonk_under80',
-            'bonk_80percent',
-            'bonk_95percent',
-        ]:
-            check_path = f"/home/shaolin_saga/data/bonk_data/{check_dir}/{token_mint}.json"
-            existing = safe_json_read(check_path, default={}, logger=bonk_bonding_logger)
-            if existing.get('total_supply') is not None:
-                total_supply = existing['total_supply']
-                break
-
-        if total_supply is None:
-            total_supply = tokens_remaining
-            bonk_bonding_logger.info(f"🔍 First observation of {token_mint}, initial supply: {total_supply:,.0f}")
-        elif tokens_remaining > total_supply:
-            # Stale/wrong saved supply — reset to current observation
-            bonk_bonding_logger.warning(f"⚠️ {token_mint} tokens_remaining ({tokens_remaining:,.0f}) > saved total_supply ({total_supply:,.0f}), resetting supply")
-            total_supply = tokens_remaining
-
-        tokens_sold = max(0, total_supply - tokens_remaining)
-        actual_progress = (tokens_sold / total_supply * 100) if total_supply > 0 else 0
-        actual_progress = min(100, actual_progress)
+        tokens_sold = calc_values.get('tokens_sold') or 0
 
         bonk_bonding_logger.debug(f"🔍 {token_mint} progress: {actual_progress:.2f}%, tokens remaining: {tokens_remaining:,.0f}, total supply: {total_supply:,.0f}")
 
         creator_info = None
-
-        # Initialize notification status — always persist total_supply so future cycles use it
-        notification_status = {'total_supply': total_supply}
-
-        calc_values = {
-            'tokens_remaining': tokens_remaining,
-            'tokens_sold': tokens_sold,
-            'progress_percentage': actual_progress,
-        }
+        # For 9-decimal tokens, persist total_supply so future cycles use the first-observation baseline
+        notification_status = {'total_supply': total_supply} if decoder_total_supply is None else {}
 
         if actual_progress >= 80 and actual_progress < 95:
             bonk_bonding_logger.info(f"🟡 Bonk {token_mint} hit 80% threshold! ({actual_progress:.1f}%)")
