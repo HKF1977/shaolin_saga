@@ -289,6 +289,7 @@ def extract_bonk_accounts(accounts):
             'FfYek5vEz23cMkWsdJwG2oa6EphsvXSHrGpdALN4g6W1',
             'WLHv2UAZm6z4KyaaELi5pjdbJh6RESMva1Rnn8pJVVh',
             'BuM6KDpWiTcxvrpXywWFiw45R2RNH8WURdvqoTDV1BW4',
+            '4Bu96XjU84XjPDSpveTVf6LYGCkfW5FK7SNkREWcEfV4',
         }
         if not mint_address:
             if len(accounts) >= 15:
@@ -346,10 +347,10 @@ def extract_bonk_accounts(accounts):
             account_mapping['raydium_pool_1'] = filtered_accounts[1] if len(filtered_accounts) > 1 else None
             account_mapping['bonding_curve'] = filtered_accounts[1] if len(filtered_accounts) > 1 else None
         elif len(accounts) > 2 and accounts[2] in SYSTEM_ACCOUNTS:
-            # accounts[2] is a system account — bonding curve at accounts[3], mint already at [4]
-            account_mapping['raydium_market'] = accounts[3] if len(accounts) > 3 else None
-            account_mapping['raydium_pool_1'] = accounts[3] if len(accounts) > 3 else None
-            account_mapping['bonding_curve'] = accounts[3] if len(accounts) > 3 else None
+            # accounts[2] is a system account — mint already at [4], bonding curve via filter
+            account_mapping['raydium_market'] = filtered_accounts[0] if len(filtered_accounts) > 0 else None
+            account_mapping['raydium_pool_1'] = filtered_accounts[1] if len(filtered_accounts) > 1 else None
+            account_mapping['bonding_curve'] = filtered_accounts[1] if len(filtered_accounts) > 1 else None
         else:
             # accounts[2] is unknown — mint at [3], bonding curve at [4]
             account_mapping['raydium_market'] = accounts[4] if len(accounts) > 4 else None
