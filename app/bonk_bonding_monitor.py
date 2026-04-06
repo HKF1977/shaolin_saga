@@ -456,7 +456,7 @@ async def create_bonk_bonding_embed(bonding_curve_address, token_mint, stage, ac
     embed.set_author(name="Shaolin Saga", icon_url=SS_ICON_URL, url="")
 
     embed.add_field(name="Bonk Bonding Curve Alert", value=f'```{stage_text}```', inline=False)
-    
+    embed.add_field(name="Time to Milestone", value=f"```{time_to_bonding}```", inline=True)
     # Progress bar visualization
     #progress_bar_length = 20
     #filled_length = int(progress_bar_length * progress / 100)
