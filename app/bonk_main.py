@@ -8,6 +8,7 @@ import logging
 import datetime
 import os
 import sys
+import re
 import requests
 import discord
 from logging.handlers import RotatingFileHandler
@@ -18,6 +19,8 @@ from solders.pubkey import Pubkey
 from solana.rpc.async_api import AsyncClient
 from utils import get_top_holders, safe_json_write
 from rate_limiter import queue_discord_send, MessagePriority, get_message_queue, monitor_rate_limits, safe_rpc_call, log_rpc_stats, get_rpc_rate_limiter, ensure_queue_processing, monitor_memory_usage
+from telegram_sender import queue_telegram_send, get_telegram_targets
+from telegram_formatter import format_new_bonk_tokens
 
 # Global variables
 bot = None
@@ -36,7 +39,8 @@ BONK_PROGRAM = "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj"
 BONK_CREATE_DISCRIMINATORS = {
     "afaf6d1f0d989bed",
     "0b28a58f15000000",
-    "4399af27da102620"
+    "4399af27da102620",
+    "25be7ede2c9aab11"
 }
 
 
@@ -262,26 +266,56 @@ def decode_bonk_create_instruction(ix_data):
 def extract_bonk_accounts(accounts):
     """Extract key accounts from Bonk token creation transaction"""
     try:
-        # Find the real mint (ends with 'bonk')
+        # Find the real mint - first try 'bonk' vanity suffix (bonk.fun UI pattern)
         mint_address = None
         for account in accounts:
             if account.lower().endswith('bonk'):
                 mint_address = account
                 break
-        
+
+        # Fallback: no vanity suffix — detect structure by accounts[2]
+        # Standard (~18 accounts): many known system accounts, mint at index 6
+        # accounts[2] is a known system account (~10 accounts): mint shifts to index 4, bonding curve at 3
+        # accounts[2] is unknown (~11 accounts, j7tracker): mint at index 3, bonding curve at 4
+        SYSTEM_ACCOUNTS = {
+            'So11111111111111111111111111111111111111112',
+            'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
+            'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s',
+            '11111111111111111111111111111111',
+            'SysvarRent111111111111111111111111111111111',
+            '2DPAtwB8L12vrMRExbLuyGnC7n2J5LNoZQSejeQGpwkr',
+            'LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj',
+            '6s1xP3hpbAfFoNtUNF8mfHsjr2Bd97JxFJRWLbL6aHuX',
+            'FfYek5vEz23cMkWsdJwG2oa6EphsvXSHrGpdALN4g6W1',
+            'WLHv2UAZm6z4KyaaELi5pjdbJh6RESMva1Rnn8pJVVh',
+            'BuM6KDpWiTcxvrpXywWFiw45R2RNH8WURdvqoTDV1BW4',
+            '4Bu96XjU84XjPDSpveTVf6LYGCkfW5FK7SNkREWcEfV4',
+        }
         if not mint_address:
-            bonk_logger.error("No mint address ending with 'bonk' found")
-            return {}
-        
+            if len(accounts) >= 15:
+                mint_address = accounts[6] if len(accounts) > 6 else None
+                bonk_logger.info(f"🔍 No 'bonk' vanity mint, standard structure ({len(accounts)} accounts) — using accounts[6]: {mint_address}")
+            elif len(accounts) > 2 and accounts[2] in SYSTEM_ACCOUNTS:
+                mint_address = accounts[4] if len(accounts) > 4 else None
+                bonk_logger.info(f"🔍 No 'bonk' vanity mint, accounts[2] is system account ({len(accounts)} accounts) — using accounts[4]: {mint_address}")
+            else:
+                mint_address = accounts[3] if len(accounts) > 3 else None
+                bonk_logger.info(f"🔍 No 'bonk' vanity mint, accounts[2] is unknown ({len(accounts)} accounts) — using accounts[3]: {mint_address}")
+            if not mint_address:
+                bonk_logger.error("Could not determine mint address")
+                return {}
+
+        creator = accounts[0] if len(accounts) > 0 else None
+
         # Based on your analysis:
         account_mapping = {
-            'creator': accounts[0] if len(accounts) > 0 else None,  # Developer/creator
-            'mint': mint_address,  # The one ending with 'bonk'
-            'bonding_curve': None,  # We need to find this
-            'raydium_launchpad_auth': accounts[4] if len(accounts) > 4 else None,  # WLHv2UAZm6z4KyaaELi5pjdbJh6RESMva1Rnn8pJVVh
+            'creator': creator,
+            'mint': mint_address,
+            'bonding_curve': None,
+            'raydium_launchpad_auth': accounts[4] if len(accounts) > 4 else None,
             'raydium_market': None
         }
-        
+
         # Find bonding curve - look for the account that's not a known system account
         known_accounts = {
             'So11111111111111111111111111111111111111112',  # SOL
@@ -294,24 +328,37 @@ def extract_bonk_accounts(accounts):
             '6s1xP3hpbAfFoNtUNF8mfHsjr2Bd97JxFJRWLbL6aHuX',  # Raydium (ants coin)
             'FfYek5vEz23cMkWsdJwG2oa6EphsvXSHrGpdALN4g6W1',  # Bonk platform config
             'WLHv2UAZm6z4KyaaELi5pjdbJh6RESMva1Rnn8pJVVh',  # Raydium auth
-            'BuM6KDpWiTcxvrpXywWFiw45R2RNH8WURdvqoTDV1BW4', # Bonkfun Platfrom Config
-            account_mapping['creator'],  # Creator
-            mint_address,  # Mint
+            'BuM6KDpWiTcxvrpXywWFiw45R2RNH8WURdvqoTDV1BW4', # Bonkfun Platform Config
+            creator,
+            mint_address,
         }
 
         # Skip first 2 accounts (creator duplicates), then filter out known accounts
         filtered_accounts = []
-        for i, account in enumerate(accounts[2:], start=2):  # Start from index 2
+        for account in accounts[2:]:
             if account not in known_accounts:
                 filtered_accounts.append(account)
-        
+
         bonk_logger.info(f"🔍 Filtered accounts: {filtered_accounts}")
-        
-        account_mapping['raydium_market'] = filtered_accounts[0] if len(filtered_accounts) > 0 else None  # Raydium Market 
-        account_mapping['raydium_pool_1'] = filtered_accounts[1] if len(filtered_accounts) > 1 else None  # Raydium pool 1 
-        account_mapping['bonding_curve'] = filtered_accounts[1] if len(filtered_accounts) > 1 else None  # Bonk bonding curve 
+
+        if len(accounts) >= 15 or mint_address.lower().endswith('bonk'):
+            # Standard bonk.fun structure — bonding curve at filtered[1]
+            account_mapping['raydium_market'] = filtered_accounts[0] if len(filtered_accounts) > 0 else None
+            account_mapping['raydium_pool_1'] = filtered_accounts[1] if len(filtered_accounts) > 1 else None
+            account_mapping['bonding_curve'] = filtered_accounts[1] if len(filtered_accounts) > 1 else None
+        elif len(accounts) > 2 and accounts[2] in SYSTEM_ACCOUNTS:
+            # accounts[2] is a system account — mint already at [4], bonding curve via filter
+            account_mapping['raydium_market'] = filtered_accounts[0] if len(filtered_accounts) > 0 else None
+            account_mapping['raydium_pool_1'] = filtered_accounts[1] if len(filtered_accounts) > 1 else None
+            account_mapping['bonding_curve'] = filtered_accounts[1] if len(filtered_accounts) > 1 else None
+        else:
+            # accounts[2] is unknown — mint at [3], bonding curve at [4]
+            account_mapping['raydium_market'] = accounts[4] if len(accounts) > 4 else None
+            account_mapping['raydium_pool_1'] = accounts[4] if len(accounts) > 4 else None
+            account_mapping['bonding_curve'] = accounts[4] if len(accounts) > 4 else None
+
         bonk_logger.info(f"🔍 Final accounts: {account_mapping}")
-        
+
         return account_mapping
         
 
@@ -365,6 +412,7 @@ async def handle_bonk_token_creation(decoded_data, accounts):
             'accounts': accounts,
             'account_mapping': account_info,  # Include the mapping for debugging
             'timestamp': datetime.datetime.now().isoformat(),
+            'created': time.time(),
             'bonk_url': f'https://bonk.fun/{mint_address}'
         }
       
@@ -412,6 +460,11 @@ async def handle_bonk_token_creation(decoded_data, accounts):
                     bonk_logger.error(f"❌ Failed to send embed to server {server_id}: {str(e)}")
             else:
                 bonk_logger.warning(f"⚠️ No suitable channel found for server {server_id}")
+
+        # Telegram: new_bonk_tokens
+        tg_text = format_new_bonk_tokens(token_data)
+        for target in get_telegram_targets('new_bonk_tokens'):
+            await queue_telegram_send(target['chat_id'], target['thread_id'], tg_text, 'new_bonk_tokens', bonk_logger, delay_seconds=target.get('delay_seconds', 0))
         
         # Console output
         print("=" * 50)
@@ -445,12 +498,14 @@ async def process_transaction(tx_data_decoded, signature=None):
         for ix_idx, ix in enumerate(transaction.message.instructions):
             program_idx = ix.program_id_index
             program_id = str(transaction.message.account_keys[program_idx])
-            
+
             if program_id == BONK_PROGRAM:
                 ix_data = bytes(ix.data)
                 if len(ix_data) >= 8:
                     discriminator_hex = ix_data[:8].hex()
-                    
+                    accounts_preview = [str(transaction.message.account_keys[idx]) for idx in ix.accounts if idx < len(transaction.message.account_keys)]
+                    bonk_logger.info(f"🔍 BONK ix [{ix_idx}] discriminator={discriminator_hex} accounts={accounts_preview}")
+
                     if discriminator_hex in BONK_CREATE_DISCRIMINATORS:
                         bonk_logger.info(f"🎯 Token creation discriminator found: {discriminator_hex}")
                         # Decode the instruction
@@ -610,6 +665,7 @@ async def listen_for_bonk_tokens():
                             "no close frame sent",
                             "connection closed",
                             "1011",
+                            "1001",
                             "1006",
                             "connection lost"
                         ]

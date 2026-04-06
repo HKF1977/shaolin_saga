@@ -1,0 +1,37 @@
+{
+  "groups": [
+    {
+      "name": "Shaolin Saga (Free)",
+      "chat_id": "-1003759203307",
+      "delay_seconds": 300,
+      "topics": {
+        "all_tokens": 5,
+        "new_bonk_tokens": 6,
+        "pump_livestreams": 92
+      }
+    },
+    {
+      "name": "Shaolin Saga Alpha (Premium)",
+      "chat_id": "-1003838056995",
+      "delay_seconds": 0,
+      "topics": {
+        "all_tokens": 2495,
+        "new_bonk_tokens": 2496,
+        "pump_livestreams": 2497,
+        "new_coin_with_socials": 3,
+        "80_bonding_curve": 12,
+        "bonding_curve_completed": 13,
+        "trade_signals": 14,
+        "large_trades": 15,
+        "whale_trades": 16,
+        "dexscreener_boosts": 304,
+        "dexscreener_top_boosts": 310,
+        "dexscreener_updates": 297,
+        "wallet_tracker": 617,
+        "based_dev": 1115,
+        "80_bonk_bonding": 1116,
+        "bonk_bonding_completed": 1117
+      }
+    }
+  ]
+}

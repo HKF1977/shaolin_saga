@@ -27,7 +27,7 @@ from utils import get_token_metadata_by_mint, get_moralis_usd_price_cached, shor
 
 # Import from config file
 sys.path.append('/home/shaolin_saga/config')
-from config import SOL, RPC_ENDPOINT, PUMP_PROGRAM, SYSTEM_TOKEN_PROGRAM, SS_ICON_URL, TWEETSCOUT_KEY, MORALIS_API_KEY
+from config import SOL, RPC_ENDPOINT, PUMP_PROGRAM, SYSTEM_TOKEN_PROGRAM, SS_ICON_URL, MORALIS_API_KEY
 
 # Load allowed servers
 with open('/home/shaolin_saga/config/servers.json', 'r') as server_file:
@@ -794,430 +794,9 @@ def register_commands(bot, logger):
             await interaction.followup.send(
                 f"An error occurred while generating the crypto heatmap: {str(e)}"
             )
-    '''
+
     @bot.tree.command(
         name="wallet-analyzer",
-        description="Analyze a Solana wallet to see tokens held with profit/loss information"
-    )
-    @app_commands.describe(
-        wallet_address="The Solana wallet address to analyze"
-    )
-    @app_commands.check(command_check)
-    async def wallet_analyzer(interaction: discord.Interaction, wallet_address: str):
-        """Command to analyze a Solana wallet's token holdings with P&L"""
-        logger.info(f"Command /wallet-analyzer used by {interaction.user} ({interaction.user.id}) with wallet: {wallet_address}")
-        
-        if not is_valid_solana_address(wallet_address):
-            await interaction.response.send_message(
-                "❌ Invalid wallet address. Please provide a valid Solana address.",
-                ephemeral=True
-            )
-            logger.warning(f"Invalid wallet address provided: {wallet_address}")
-            return
-        
-        await interaction.response.defer(thinking=True)
-        
-        try:
-            # old call
-            #request_data = {
-            #    "jsonrpc": "2.0",
-            #    "id": 1,
-            #    "method": "getTokenAccountsByOwner",
-            #    "params": [
-            #       wallet_address,
-            #        {"programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},
-            #        {"encoding": "jsonParsed"}
-            #    ]
-            #}
-
-            async with aiohttp.ClientSession() as session:
-                accounts = []
-    
-                for program_id in [
-                    "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
-                    "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
-                ]:
-                    request_data = {
-                        "jsonrpc": "2.0",
-                        "id": 1,
-                        "method": "getTokenAccountsByOwner",
-                        "params": [
-                            wallet_address,
-                            {"programId": program_id},
-                            {"encoding": "jsonParsed"}
-                        ]
-                    }
-
-                    async with session.post(RPC_ENDPOINT, json=request_data) as response:
-                        if response.status != 200:
-                            await interaction.followup.send(f"Error fetching token accounts: HTTP {response.status}")
-                            return
-                     
-                        result = await response.json()
-                        if "result" in result and "value" in result["result"]:
-                            accounts.extend(result["result"]["value"])
-    
-                logger.info(f"Found {len(accounts)} token accounts for {wallet_address}")
-
-
-                # Collect all token data before fetching prices
-                all_token_data = {}
-                mint_blocktimes = {}
-                    
-                for account_data in accounts:
-                    try:
-                        info = account_data["account"]["data"]["parsed"]["info"]
-                        mint_address = info["mint"]
-                        token_amount = int(info["tokenAmount"]["amount"])
-                            
-                        if token_amount == 0:
-                            continue
-                            
-                        token_account_pubkey = account_data["pubkey"]
-                            
-                        # Get transaction history
-                        signatures = await get_token_account_signatures(session, token_account_pubkey)
-                        logger.info(f"Found {len(signatures)} SIGNATURES token accounts for {wallet_address}")
-                        transactions = await get_token_account_transactions(session, signatures, wallet_address, logger)
-                        logger.info(f"Found {len(transactions)} TRANSACTIONS token accounts for {wallet_address}")
-                        summary = aggregate_token_transactions(transactions)
-                        #logger.info(f"aggregate token summary: {summary}")
-                        
-                        oldest_blocktime = None
-                        if signatures:
-                            oldest_blocktime = signatures[-1].get("blockTime")
-                            #logger.info(f"Mint: {mint_address} Oldest Blocktime: {oldest_blocktime}")
-                        
-                            # Store blocktime with the summary data
-                        for mint in summary.keys():
-                            summary[mint]["oldest_blocktime"] = oldest_blocktime
-
-                        # Merge into all_token_data
-                        all_token_data.update(summary)
-                                
-                    except Exception as e:
-                        logger.error(f"Error processing token account: {str(e)}")
-                        continue
-                    
-                if not all_token_data:
-                    await interaction.followup.send("No token trading history found for this wallet.")
-                    return
-                    
-                    # Single batch price call for all mints
-                mints = list(all_token_data.keys())
-                prices = await get_moralis_token_prices(mints, MORALIS_API_KEY, logger)
-                logger.info(f"Found {prices} for token accounts")
-                    
-                # Build token analysis
-                token_analysis = []
-                    
-                for mint, data in all_token_data.items():
-                    price_data = prices.get(mint, {})
-                    current_price = price_data.get("usdPrice", 0)
-                    oldest_blocktime = data.get("oldest_blocktime")   
-                    unrealized_value = data["net_position"] * current_price
-                    #pnl = unrealized_value
-                    pnl = 0
-                    
-                    if unrealized_value < 1:
-                        continue
-
-
-                    if oldest_blocktime:
-                        pair_address = await get_pair_address(mint, session)
-                        price_at_blocktime = await get_price_at_blocktime(pair_address, oldest_blocktime, session)
-                        #logger.info(f"Fetching price for {mint} at blocktime {oldest_blocktime}, pair: {pair_address}, price {price_at_blocktime}")     
-                        
-                        if price_at_blocktime is None:
-                            pnl = 0  # Skip if no historical price available
-                        else:
-                            pnl = (current_price - price_at_blocktime) * data["net_position"]
-                    else:
-                        pnl = 0
-
-                    token_analysis.append({
-                        "mint": mint,
-                        "symbol": price_data.get("symbol", "UNKNOWN"),
-                        "name": price_data.get("name", "Unknown"),
-                        "logo": price_data.get("logo"),
-                        "tokens_bought": data["total_bought"],
-                        "tokens_sold": data["total_sold"],    
-                        "position": data["net_position"],
-                        "avg_buy_price": data["avg_buy_price"],
-                        "current_price": current_price,
-                        "unrealized_value": unrealized_value,
-                        "pnl": pnl
-                    })
-                    #logger.info(f"Token analysis {token_analysis}")
-           
-
-            # Sort by PNL descending
-            token_analysis.sort(key=lambda x: x["unrealized_value"], reverse=True)
-            
-            # Build embeds (max 2, 20 tokens each)
-            embeds = []
-            tokens_per_embed = 15
-            max_embeds = 3
-            
-            for embed_num in range(max_embeds):
-                start_idx = embed_num * tokens_per_embed
-                end_idx = start_idx + tokens_per_embed
-                tokens_slice = token_analysis[start_idx:end_idx]
-                
-                if not tokens_slice:
-                    break
-                
-                # Create embed
-                embed = discord.Embed(
-                    title="💼 Wallet Analysis" if embed_num == 0 else "💼 Wallet Analysis (cont.)",
-                    description=f"Token holdings for [{wallet_address}](https://solscan.io/account/{wallet_address})" if embed_num == 0 else "",
-                    color=0xFFD700,
-                    timestamp=datetime.utcnow()
-                )
-                embed.set_author(name="Shaolin Saga", icon_url=SS_ICON_URL)
-                
-                # Portfolio totals (only on first embed)
-                if embed_num == 0:
-                    total_unrealized = sum(t["unrealized_value"] for t in token_analysis)
-                    total_pnl = sum(t["pnl"] for t in token_analysis)
-                    pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
-                    
-                    embed.add_field(
-                        name="📊 Portfolio Summary",
-                        value=f"**Total Unrealised:** ${total_unrealized:,.2f}\n**PNL:** ${total_pnl:+,.2f}",
-                        inline=False
-                    )
-                
-                # Build table for this slice
-                table = "```\n"
-                table += f"{'Symbol':>5}{'Bought':>13}{'Sold':>11}{'Unrealised$':>16}{'PNL$':>9}\n"
-                table += "-" * 56 + "\n"
-                
-                for token in tokens_slice:
-                    pnl_emoji = "🟢" if token["pnl"] >= 0 else "🔴"
-                    symbol = f"{token['symbol'][:8]:<8}"
-                    bought = shorten_number(token['tokens_bought'])
-                    sold = shorten_number(token['tokens_sold'])
-                    unreal = f"${shorten_number(token['unrealized_value'])}"
-                    pnl = f"${shorten_number(token['pnl'])}"
-                    
-                    table += f"{pnl_emoji:<2}{symbol}{bought:>10}{sold:^12}{unreal:^15}{pnl:^8}\n"
-                
-                table += "```"
-
-                # Check length and truncate if needed
-                if len(table) > 1000:
-                    table = table[:950] + "\n...\n```"
-
-                embed.add_field(name="Holdings", value=table, inline=False)
-
-                # Add overflow banner on last embed
-                if embed_num == max_embeds - 1 and len(token_analysis) > (max_embeds * tokens_per_embed):
-                    remaining = len(token_analysis) - (max_embeds * tokens_per_embed)
-                    embed.add_field(
-                        name="⚠️ More Tokens",
-                        value=f"+ {remaining} more tokens not shown",
-                        inline=False
-                    )
-                
-                embed.set_footer(text="Powered by Shaolin Saga!", icon_url=SS_ICON_URL)
-                embeds.append(embed)
-            
-            # Send all embeds
-            for embed in embeds:
-                await interaction.followup.send(embed=embed)
-            
-            logger.info(f"Successfully sent wallet analysis ({len(embeds)} embeds) for {wallet_address}")
-    
-        except Exception as e:
-            logger.error(f"Error in wallet-analyzer command: {str(e)}")
-            logger.error(traceback.format_exc())
-            await interaction.followup.send(f"An error occurred while analyzing the wallet: {str(e)}")
-
-    '''
-    @bot.tree.command(
-        name="wallet-analyzer-v2",
-        description="Fast wallet analysis - current holdings only"
-    )
-    @app_commands.describe(
-        wallet_address="The Solana wallet address to analyze"
-    )
-    @app_commands.check(command_check)
-    async def wallet_analyzer_v2(interaction: discord.Interaction, wallet_address: str):
-        """Fast wallet analyzer - current holdings snapshot"""
-        logger.info(f"Command /wallet-analyzer-v2 used by {interaction.user} ({interaction.user.id}) with wallet: {wallet_address}")
-        
-        if not is_valid_solana_address(wallet_address):
-            await interaction.response.send_message(
-                "❌ Invalid wallet address. Please provide a valid Solana address.",
-                ephemeral=True
-            )
-            logger.warning(f"Invalid wallet address provided: {wallet_address}")
-            return
-        
-        await interaction.response.defer(thinking=True)
-        
-        try:
-            async with aiohttp.ClientSession() as session:
-                # 1. Get native SOL balance
-                sol_request = {
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "getBalance",
-                    "params": [wallet_address]
-                }
-                
-                async with session.post(RPC_ENDPOINT, json=sol_request) as response:
-                    result = await response.json()
-                    native_sol = result["result"]["value"] / 1_000_000_000
-                
-                # 2. Get all token accounts
-                token_accounts = []
-                for program_id in ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", 
-                                "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"]:
-                    request_data = {
-                        "jsonrpc": "2.0",
-                        "id": 1,
-                        "method": "getTokenAccountsByOwner",
-                        "params": [
-                            wallet_address,
-                            {"programId": program_id},
-                            {"encoding": "jsonParsed"}
-                        ]
-                    }
-                    
-                    async with session.post(RPC_ENDPOINT, json=request_data) as response:
-                        result = await response.json()
-                        if "result" in result:
-                            token_accounts.extend(result["result"]["value"])
-                
-                # 3. Extract non-zero holdings
-                holdings = []
-                for account in token_accounts:
-                    info = account["account"]["data"]["parsed"]["info"]
-                    amount = float(info["tokenAmount"]["uiAmount"] or 0)
-                    
-                    if amount > 0:
-                        holdings.append({
-                            "mint": info["mint"],
-                            "amount": amount
-                        })
-                
-                logger.info(f"Found {len(holdings)} non-zero holdings from {len(token_accounts)} accounts")
-                
-                if not holdings:
-                    await interaction.followup.send("No token holdings found for this wallet.")
-                    return
-                
-                # 4. Batch price lookup
-                mints = [h["mint"] for h in holdings]
-                prices = await get_moralis_token_prices(mints, MORALIS_API_KEY, logger)
-                
-                # 5. Calculate values and filter dust (< $1)
-                token_portfolio = []
-                for holding in holdings:
-                    mint = holding["mint"]
-                    price_data = prices.get(mint, {})
-                    price_usd = price_data.get("usdPrice", 0)
-                    value_usd = holding["amount"] * price_usd
-                    
-                    if value_usd >= 1.0:  # Filter dust
-                        token_portfolio.append({
-                            "mint": mint,
-                            "symbol": price_data.get("symbol", "UNKNOWN"),
-                            "name": price_data.get("name", "Unknown"),
-                            "amount": holding["amount"],
-                            "price_usd": price_usd,
-                            "value_usd": value_usd
-                        })
-                
-                # Sort by value descending
-                token_portfolio.sort(key=lambda x: x["value_usd"], reverse=True)
-                
-                # 6. Calculate totals
-                total_token_value = sum(t["value_usd"] for t in token_portfolio)
-                native_sol_usd = native_sol * 140  # Approximate SOL price
-                total_net_worth = native_sol_usd + total_token_value
-                
-                # 7. Build embeds
-                embeds = []
-                tokens_per_embed = 15
-                max_embeds = 3
-                
-                for embed_num in range(max_embeds):
-                    start_idx = embed_num * tokens_per_embed
-                    end_idx = start_idx + tokens_per_embed
-                    tokens_slice = token_portfolio[start_idx:end_idx]
-                    
-                    if not tokens_slice:
-                        break
-                    
-                    embed = discord.Embed(
-                        title="💼 Wallet Snapshot" if embed_num == 0 else "💼 Wallet Snapshot (cont.)",
-                        description=f"Current holdings for [{wallet_address}](https://solscan.io/account/{wallet_address})" if embed_num == 0 else "",
-                        color=0xFFD700,
-                        timestamp=datetime.utcnow()
-                    )
-                    embed.set_author(name="Shaolin Saga", icon_url=SS_ICON_URL)
-                    
-                    # Portfolio summary (first embed only)
-                    if embed_num == 0:
-                        embed.add_field(
-                            name="📊 Portfolio Summary",
-                            value=f"**Native SOL:** {native_sol:.2f} SOL (${native_sol_usd:,.0f})\n"
-                                f"**Token Value:** ${total_token_value:,.0f}\n"
-                                f"**Total Net Worth:** ${total_net_worth:,.0f}\n"
-                                f"**Tokens Held:** {len(token_portfolio)} (${len(holdings) - len(token_portfolio)} dust filtered)",
-                            inline=False
-                        )
-                    
-                    # Build table
-                    table = "```\n"
-                    table += f"{'Symbol':>8}{'Amount':>14}{'Price':>12}{'Value':>12}\n"
-                    table += "-" * 48 + "\n"
-                    
-                    for token in tokens_slice:
-                        symbol = f"{token['symbol'][:7]:<7}"
-                        amount = shorten_number(token['amount'])
-                        price = f"${token['price_usd']:.4f}" if token['price_usd'] < 1 else f"${token['price_usd']:.2f}"
-                        value = f"${shorten_number(token['value_usd'])}"
-                        
-                        table += f"{symbol:>8}{amount:>14}{price:>12}{value:>12}\n"
-                    
-                    table += "```"
-                    
-                    if len(table) > 1000:
-                        table = table[:950] + "\n...\n```"
-                    
-                    embed.add_field(name="Holdings", value=table, inline=False)
-                    
-                    # Overflow banner
-                    if embed_num == max_embeds - 1 and len(token_portfolio) > (max_embeds * tokens_per_embed):
-                        remaining = len(token_portfolio) - (max_embeds * tokens_per_embed)
-                        embed.add_field(
-                            name="⚠️ More Tokens",
-                            value=f"+ {remaining} more tokens not shown (total value: ${sum(t['value_usd'] for t in token_portfolio[max_embeds * tokens_per_embed:]):,.0f})",
-                            inline=False
-                        )
-                    
-                    embed.set_footer(text="Powered by Shaolin Saga! | Snapshot view", icon_url=SS_ICON_URL)
-                    embeds.append(embed)
-                
-                # Send all embeds
-                for embed in embeds:
-                    await interaction.followup.send(embed=embed)
-                
-                logger.info(f"Successfully sent wallet snapshot ({len(embeds)} embeds) for {wallet_address}")
-        
-        except Exception as e:
-            logger.error(f"Error in wallet-analyzer-v2 command: {str(e)}")
-            logger.error(traceback.format_exc())
-            await interaction.followup.send(f"An error occurred while analyzing the wallet: {str(e)}")
-
-
-
-    @bot.tree.command(
-        name="wallet-analyzer-v3",
         description="Fast wallet analysis - SOL performance and token holdings"
     )
     @app_commands.describe(
@@ -1451,6 +1030,9 @@ def register_commands(bot, logger):
         await interaction.response.defer(thinking=True)
         
         try:
+            image_url = None
+            metadata_uri = None
+
             # First, check if this is a pump.fun token we already know about
             pump_token_path = f"/home/shaolin_saga/data/pump_data/metadata/{token_address}.json"
             if os.path.exists(pump_token_path):
@@ -1462,13 +1044,14 @@ def register_commands(bot, logger):
                 token_name = tx_data.get('name', 'Unknown Token')
                 token_symbol = tx_data.get('symbol', 'UNKNOWN')
                 
-                if metadata_uri:
-                    # Get metadata from URI
+                # Try direct image_url first (stored in our metadata JSON)
+                image_url = tx_data.get('image_url')
+
+                # Fall back to fetching from metadata URI
+                if not image_url and metadata_uri:
                     token_data = await get_metadata(metadata_uri)
                     image_url = token_data.get('image')
-                    
                     if image_url:
-                        # Process IPFS URL if needed
                         image_url = await get_image_data(image_url)
             else:
                 # Not a pump.fun token, fetch metadata from RPC
@@ -1976,26 +1559,24 @@ def register_commands(bot, logger):
         try:
             # Clean the identifier (remove @ if present)
             clean_identifier = identifier.lstrip('@')
-            
-            # Determine if it's a user_id (numeric) or handle
-            if clean_identifier.isdigit():
-                params = {"user_id": clean_identifier}
-            else:
-                params = {"link": clean_identifier}
-            
+
+            # Determine lookup method
+            how = "userid" if clean_identifier.isdigit() else "username"
+
             # Make API request
             headers = {
-                'Accept': 'application/json',
-                'ApiKey': TWEETSCOUT_KEY
+                'x-api-key': os.environ.get('TOTO_API_KEY', ''),
+                'Content-Type': 'application/json'
             }
-            
+            payload = {"user": clean_identifier, "how": how, "page": 1}
+
             async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    "https://api.tweetscout.io/v2/handle-history",
+                async with session.post(
+                    "https://toto.oz.xyz/api/metadata/get_past_usernames",
                     headers=headers,
-                    params=params
+                    json=payload
                 ) as response:
-                    
+
                     if response.status == 404:
                         embed = discord.Embed(
                             title="❌ Account Not Found",
@@ -2012,19 +1593,21 @@ def register_commands(bot, logger):
                         embed.set_footer(text="Powered by Shaolin Saga!", icon_url=SS_ICON_URL)
                         await interaction.followup.send(embed=embed)
                         return
-                    
+
                     elif response.status == 403:
                         await interaction.followup.send("❌ API access denied. Please check API key configuration.")
-                        logger.error("TweetScout API returned 403 - check API key")
+                        logger.error("Toto API returned 403 - check API key")
                         return
-                    
+
                     elif response.status != 200:
                         await interaction.followup.send(f"❌ API error: {response.status}")
-                        logger.error(f"TweetScout API returned {response.status}: {await response.text()}")
+                        logger.error(f"Toto API returned {response.status}: {await response.text()}")
                         return
-                    
+
                     data = await response.json()
-                    handles = data.get('handles', [])
+                    # Map response to internal format: {handle, date}
+                    raw = data.get('data', [])
+                    handles = [{"handle": e.get("username", "Unknown"), "date": e.get("last_checked", "Unknown")} for e in raw]
                     
                     if not handles:
                         embed = discord.Embed(
@@ -2047,10 +1630,10 @@ def register_commands(bot, logger):
                     # Sort handles by date (newest first)
                     def parse_date(date_str):
                         try:
-                            return datetime.strptime(date_str, '%d-%m-%Y')
-                        except ValueError:
+                            return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                        except (ValueError, AttributeError):
                             return datetime.min  # fallback for invalid dates
-                    
+
                     handles.sort(key=lambda x: parse_date(x.get('date', '')), reverse=True)
 
                     

@@ -13,6 +13,8 @@ from solana.rpc.async_api import AsyncClient
 from solders.pubkey import Pubkey
 from utils import format_social_link, get_saved_bonk_metadata, get_top_holders, safe_json_read, safe_json_write, safe_file_move, safe_file_exists, safe_file_delete
 from rate_limiter import queue_discord_send, MessagePriority, safe_rpc_call
+from telegram_sender import queue_telegram_send, get_telegram_targets
+from telegram_formatter import format_bonk_bonding_curve
 import sys
 
 sys.path.append('/home/shaolin_saga/config')
@@ -75,31 +77,36 @@ def decode_bonding_curve_data(hex_data: str) -> dict:
         token_balance_offset = 64
         token_balance_raw = struct.unpack('<Q', data[token_balance_offset:token_balance_offset+8])[0]
         
-        # Convert to human readable tokens 
-        tokens_remaining = token_balance_raw / (10 ** 6)  # Changed from 10^9 to 10^6
-        
-        #bonk_bonding_logger.debug(f"🔍 DECODER: Tokens remaining: {tokens_remaining:,.0f}")
-        
-        # Calculate progress
-        # Progress = (tokens_sold / total_supply) * 100
-        # tokens_sold = total_supply - tokens_remaining
-        tokens_sold = BONK_TOTAL_SUPPLY - tokens_remaining
-        progress_percentage = (tokens_sold / BONK_TOTAL_SUPPLY) * 100
-        progress_percentage = max(0, min(100, progress_percentage))
-        
-        
+        # Convert to human readable tokens
+        tokens_remaining = token_balance_raw / 1e6
+        if tokens_remaining > BONK_TOTAL_SUPPLY:
+            # 9-decimal token (e.g. 10M supply) — total supply unknown, handle in caller
+            tokens_remaining = token_balance_raw / 1e9
+            total_supply = None
+        else:
+            total_supply = BONK_TOTAL_SUPPLY
+
+        if total_supply is not None:
+            tokens_sold = total_supply - tokens_remaining
+            progress_percentage = (tokens_sold / total_supply) * 100
+            progress_percentage = max(0, min(100, progress_percentage))
+        else:
+            tokens_sold = None
+            progress_percentage = None
+
         return {
             "success": True,
             "platform": "Bonk.fun (Raydium Launchpad)",
             "raw_data": {
                 "token_balance_raw": token_balance_raw,
-                "tokens_remaining": tokens_remaining
+                "tokens_remaining": tokens_remaining,
+                "total_supply": total_supply,
             },
             "calculated_values": {
                 "progress_percentage": progress_percentage,
                 "tokens_remaining": tokens_remaining,
                 "tokens_sold": tokens_sold,
-                "is_complete": progress_percentage >= 100
+                "is_complete": progress_percentage >= 100 if progress_percentage is not None else False,
             }
         }
         
@@ -126,20 +133,21 @@ async def get_bonding_curve_data(client, bonding_curve_address):
         if not response.value or not response.value.data:
             bonk_bonding_logger.warning(f"No data for bonding curve account {bonding_curve_address}")
             return None
-            
+
         # Convert account data to hex and decode
         hex_data = response.value.data.hex()
         curve_data = decode_bonding_curve_data(hex_data)
-        
+
         if not curve_data.get("success"):
             bonk_bonding_logger.error(f"Failed to decode bonding curve data: {curve_data.get('error')}")
-            return None
-            
+            raise ValueError(f"Decode failed for {bonding_curve_address}: {curve_data.get('error')}")
+
         return curve_data
-        
-    except Exception as e:
-        bonk_bonding_logger.error(f"Error getting bonding curve data for {bonding_curve_address}: {e}")
-        return None
+
+    except Exception:
+        # Re-raise so process_bonk_bonding_curve can distinguish RPC/decode errors
+        # from a genuinely missing account (None return above)
+        raise
 
 
 def save_bonk_bonding_curve_state(curve_data, token_mint, directory, notification_status=None):
@@ -209,7 +217,7 @@ async def process_bonk_bonding_curve(bonding_curve_address, token_mint):
                 
                 for directory in directories:
                     file_path = f"{directory}/{token_mint}.json"
-                    if safe_file_delete(file_path, logger=bonk_bonding_logger):
+                    if safe_file_exists(file_path) and safe_file_delete(file_path, logger=bonk_bonding_logger):
                         bonk_bonding_logger.info(f"Removed dead bonk token file: {file_path}")
                 return
 
@@ -217,35 +225,62 @@ async def process_bonk_bonding_curve(bonding_curve_address, token_mint):
             bonk_bonding_logger.error(f"Error processing bonk curve {bonding_curve_address}: {e}")
             return
 
+        raw = curve_data["raw_data"]
+        tokens_remaining = raw["tokens_remaining"]
+        decoder_total_supply = raw["total_supply"]  # None for 9-decimal/10M tokens
         calc_values = curve_data["calculated_values"]
-        actual_progress = calc_values['progress_percentage']
-        
-        bonk_bonding_logger.debug(f"🔍 {token_mint} progress: {actual_progress:.2f}%, tokens remaining: {calc_values['tokens_remaining']:,.0f}")
-        
+        actual_progress = calc_values["progress_percentage"]
+
+        # 9-decimal (10M supply) edge case — decoder couldn't compute progress,
+        # fall back to first-observation total_supply stored in state files
+        if decoder_total_supply is None:
+            saved_supply = None
+            for check_dir in ['active_bonk_tokens', 'bonk_under80', 'bonk_80percent', 'bonk_95percent']:
+                check_path = f"/home/shaolin_saga/data/bonk_data/{check_dir}/{token_mint}.json"
+                existing = safe_json_read(check_path, default={}, logger=bonk_bonding_logger)
+                if existing.get('total_supply') is not None:
+                    saved_supply = existing['total_supply']
+                    break
+            if saved_supply is None:
+                saved_supply = tokens_remaining
+                bonk_bonding_logger.info(f"🔍 Low-supply token {token_mint}, first observation: {saved_supply:,.0f}")
+            total_supply = max(saved_supply, tokens_remaining)
+            tokens_sold = max(0, total_supply - tokens_remaining)
+            actual_progress = (tokens_sold / total_supply * 100) if total_supply > 0 else 0
+            actual_progress = min(100, actual_progress)
+            calc_values = {'tokens_remaining': tokens_remaining, 'tokens_sold': tokens_sold, 'progress_percentage': actual_progress}
+        else:
+            total_supply = decoder_total_supply
+
+        # Pool empty → bonding complete
+        if tokens_remaining == 0:
+            actual_progress = 100
+            calc_values['progress_percentage'] = 100
+
+        tokens_sold = calc_values.get('tokens_sold') or 0
+
+        bonk_bonding_logger.debug(f"🔍 {token_mint} progress: {actual_progress:.2f}%, tokens remaining: {tokens_remaining:,.0f}, total supply: {total_supply:,.0f}")
+
         creator_info = None
+        # For 9-decimal tokens, persist total_supply so future cycles use the first-observation baseline
+        notification_status = {'total_supply': total_supply} if decoder_total_supply is None else {}
 
-        # Initialize notification status
-        notification_status = {}
-
-        # Use actual_progress instead of progress for threshold checks
         if actual_progress >= 80 and actual_progress < 95:
             bonk_bonding_logger.info(f"🟡 Bonk {token_mint} hit 80% threshold! ({actual_progress:.1f}%)")
-            bonk_bonding_logger.info(f"   Tokens remaining: {calc_values['tokens_remaining']:,.0f}")
-            bonk_bonding_logger.info(f"   Tokens sold: {calc_values['tokens_sold']:,.0f}")
-            
-            # Check if we've already notified for 80%
+            bonk_bonding_logger.info(f"   Tokens remaining: {tokens_remaining:,.0f}")
+            bonk_bonding_logger.info(f"   Tokens sold: {tokens_sold:,.0f}")
+
             file_path = f"/home/shaolin_saga/data/bonk_data/bonk_80percent/{token_mint}.json"
             existing_data = safe_json_read(file_path, default={}, logger=bonk_bonding_logger)
             already_notified = existing_data.get('notified_80percent', False)
-            
 
             notification_status['notified_80percent'] = True
             notification_status['bondingCurve'] = str(bonding_curve_address)
             if creator_info:
                 notification_status['creator'] = creator_info
             notification_status['mint'] = token_mint
-            notification_status['progress'] = actual_progress  # Use actual_progress
-            
+            notification_status['progress'] = actual_progress
+
             save_bonk_bonding_curve_state(curve_data, token_mint, "80percent", notification_status)
 
             if not already_notified:
@@ -253,10 +288,9 @@ async def process_bonk_bonding_curve(bonding_curve_address, token_mint):
 
         elif actual_progress >= 95 and actual_progress < 100:
             bonk_bonding_logger.info(f"🟠 Bonk {token_mint} hit 95% threshold! ({actual_progress:.1f}%)")
-            bonk_bonding_logger.info(f"   Tokens remaining: {calc_values['tokens_remaining']:,.0f}")
-            bonk_bonding_logger.info(f"   Tokens sold: {calc_values['tokens_sold']:,.0f}")
-            
-            # Check if we've already notified for 95%
+            bonk_bonding_logger.info(f"   Tokens remaining: {tokens_remaining:,.0f}")
+            bonk_bonding_logger.info(f"   Tokens sold: {tokens_sold:,.0f}")
+
             file_path = f"/home/shaolin_saga/data/bonk_data/bonk_95percent/{token_mint}.json"
             existing_data = safe_json_read(file_path, default={}, logger=bonk_bonding_logger)
             already_notified = existing_data.get('notified_95percent', False)
@@ -266,39 +300,37 @@ async def process_bonk_bonding_curve(bonding_curve_address, token_mint):
             if creator_info:
                 notification_status['creator'] = creator_info
             notification_status['mint'] = token_mint
-            notification_status['progress'] = actual_progress  # Use actual_progress
-            
+            notification_status['progress'] = actual_progress
+
             save_bonk_bonding_curve_state(curve_data, token_mint, "95percent", notification_status)
             if not already_notified:
                 await trigger_bonk_discord_alert(bonding_curve_address, token_mint, "95percent", actual_progress, calc_values)
 
-        elif actual_progress >= 100 or calc_values.get('is_complete', False):
+        elif actual_progress >= 100:
             bonk_bonding_logger.info(f"🔴 Bonk {token_mint} completed bonding curve! ({actual_progress:.1f}%)")
-            bonk_bonding_logger.info(f"   Final tokens remaining: {calc_values['tokens_remaining']:,.0f}")
-            bonk_bonding_logger.info(f"   Total tokens sold: {calc_values['tokens_sold']:,.0f}")
-            
-            # Check if we've already notified for completion
+            bonk_bonding_logger.info(f"   Final tokens remaining: {tokens_remaining:,.0f}")
+            bonk_bonding_logger.info(f"   Total tokens sold: {tokens_sold:,.0f}")
+
             file_path = f"/home/shaolin_saga/data/bonk_data/bonk_bondingComplete/{token_mint}.json"
             existing_data = safe_json_read(file_path, default={}, logger=bonk_bonding_logger)
             already_notified = existing_data.get('notified_complete', False)
-
 
             notification_status['notified_complete'] = True
             notification_status['bondingCurve'] = str(bonding_curve_address)
             if creator_info:
                 notification_status['creator'] = creator_info
             notification_status['mint'] = token_mint
-            notification_status['progress'] = actual_progress  # Use actual_progress
-            
+            notification_status['progress'] = actual_progress
+
             save_bonk_bonding_curve_state(curve_data, token_mint, "bondingComplete", notification_status)
-            
+
             if not already_notified:
                 await trigger_bonk_discord_alert(bonding_curve_address, token_mint, "complete", actual_progress, calc_values)
 
         else:
             bonk_bonding_logger.debug(f"⚪ Bonk {token_mint} still under 80% ({actual_progress:.1f}%)")
-            bonk_bonding_logger.debug(f"   Tokens remaining: {calc_values['tokens_remaining']:,.0f}")
-            bonk_bonding_logger.debug(f"   Tokens sold: {calc_values['tokens_sold']:,.0f}")
+            bonk_bonding_logger.debug(f"   Tokens remaining: {tokens_remaining:,.0f}")
+            bonk_bonding_logger.debug(f"   Tokens sold: {tokens_sold:,.0f}")
             
             # Save state for under80
             notification_status['bondingCurve'] = str(bonding_curve_address)
@@ -343,6 +375,35 @@ async def trigger_bonk_discord_alert(bonding_curve_address, token_mint, stage, a
                 bonk_bonding_logger.error(f"Error sending bonk embed: {str(e)}")
                 bonk_bonding_logger.error(f"Full traceback: {traceback.format_exc()}")
 
+    if stage in ("80percent", "complete"):
+        tg_signal = "80_bonk_bonding" if stage == "80percent" else "bonk_bonding_completed"
+        token_data = await get_saved_bonk_metadata(token_mint)
+        if token_data:
+            creator = token_data.get('account_mapping', {}).get('creator')
+            tg_text = format_bonk_bonding_curve(
+                token_mint, stage,
+                token_data.get('name', 'Unknown'), token_data.get('symbol', '?'),
+                creator, token_data.get('twitter_url'), token_data.get('telegram_url'),
+                token_data.get('website_url'), actual_progress
+            )
+            for target in get_telegram_targets(tg_signal):
+                await queue_telegram_send(target['chat_id'], target['thread_id'], tg_text, tg_signal, bonk_bonding_logger)
+
+def calculate_time_to_bonding(created_timestamp: float) -> str:
+    """Calculate time elapsed from token creation to bonding milestone"""
+    elapsed_seconds = time.time() - created_timestamp
+    
+    hours = int(elapsed_seconds // 3600)
+    minutes = int((elapsed_seconds % 3600) // 60)
+    seconds = int(elapsed_seconds % 60)
+    
+    if hours > 0:
+        return f"{hours}h {minutes}m {seconds}s"
+    elif minutes > 0:
+        return f"{minutes}m {seconds}s"
+    else:
+        return f"{seconds}s"
+
 async def create_bonk_bonding_embed(bonding_curve_address, token_mint, stage, actual_progress, calc_values):
     """Create Discord embed for bonk bonding curve alerts"""
     # Get token data
@@ -352,7 +413,7 @@ async def create_bonk_bonding_embed(bonding_curve_address, token_mint, stage, ac
         token_name = token_data.get('name', 'Unknown')
         token_symbol = token_data.get('symbol', 'Unknown')
         image_url = token_data.get('image_url')
-        description = token_data.get('description')
+        description = token_data.get('description') or 'No Description Added'
         website_url = token_data.get('website_url')
         twitter_url = token_data.get('twitter_url')
         telegram_url = token_data.get('telegram_url')
@@ -361,14 +422,19 @@ async def create_bonk_bonding_embed(bonding_curve_address, token_mint, stage, ac
         token_name = 'Unknown'
         token_symbol = 'Unknown'
         image_url = None
-        description = None
+        description = 'No Description Added'
         twitter_url = None
         telegram_url = None
         website_url = None
         user = None
+
+    if token_data and 'created' in token_data:
+        time_to_bonding = calculate_time_to_bonding(token_data['created'])
+    bonk_bonding_logger.debug(f"time_to_bonding: {time_to_bonding}")
     
+
     contract_uri = f'https://bonk.fun/token/{token_mint}'
-    creator_uri = 'https://solscan.io/account/' + user
+    creator_uri = 'https://solscan.io/account/' + (user or 'Unknown')
 
     # Set stage-specific text
     if stage == "80percent":
@@ -390,7 +456,7 @@ async def create_bonk_bonding_embed(bonding_curve_address, token_mint, stage, ac
     embed.set_author(name="Shaolin Saga", icon_url=SS_ICON_URL, url="")
 
     embed.add_field(name="Bonk Bonding Curve Alert", value=f'```{stage_text}```', inline=False)
-    
+    embed.add_field(name="Time to Milestone", value=f"```{time_to_bonding}```", inline=True)
     # Progress bar visualization
     #progress_bar_length = 20
     #filled_length = int(progress_bar_length * progress / 100)

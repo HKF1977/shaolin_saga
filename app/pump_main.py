@@ -37,6 +37,8 @@ from time import time as current_time
 
 # At the top of your main files:
 from rate_limiter import queue_discord_send, MessagePriority, get_message_queue, monitor_rate_limits, safe_rpc_call, log_rpc_stats, get_rpc_rate_limiter, ensure_queue_processing, monitor_memory_usage
+from telegram_sender import queue_telegram_send, get_telegram_targets, ensure_telegram_queue_processing
+from telegram_formatter import format_all_tokens, format_new_coin_with_socials, format_bonding_curve, format_trade_signal, format_pump_livestream, format_dexscreener_boost, format_dexscreener_paid
 
 #Get vars from config.py
 #sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -243,6 +245,11 @@ async def trigger_livestream_alert(stream_data):
                 livestream_logger.info(f"Sent livestream alert for {stream_data.get('mint')} to server {server['server_id']}")
                 await asyncio.sleep(1)
 
+    # Telegram: pump_livestreams
+    tg_text = format_pump_livestream(stream_data)
+    for target in get_telegram_targets('pump_livestreams'):
+        await queue_telegram_send(target['chat_id'], target['thread_id'], tg_text, 'pump_livestreams', websocket_logger, delay_seconds=target.get('delay_seconds', 0))
+
 async def create_livestream_embed(stream_data):
     """Create Discord embed for new livestream"""
     mint = stream_data.get('mint', 'Unknown')
@@ -383,6 +390,11 @@ async def check_and_alert_if_clean(mint_address: str, servers_config: list, get_
                     await queue_discord_send(channel, embed, "trade_signals", logger, MessagePriority.HIGH)
                     if logger:
                         logger.info(f"✅ Sent clean bundle alert for {mint_address} to server {server['server_id']}")
+
+            # Telegram: trade_signals
+            tg_text = format_trade_signal(mint_address, metadata, score)
+            for target in get_telegram_targets('trade_signals'):
+                await queue_telegram_send(target['chat_id'], target['thread_id'], tg_text, 'trade_signals', logger)
             
     except Exception as e:
         if logger:
@@ -827,6 +839,22 @@ async def trigger_discord_alert(bonding_curve, mint, stage):
             except Exception as e:
                 bonding_logger.error(f"Error sending embed: {str(e)}")
                 bonding_logger.error(f"Full traceback: {traceback.format_exc()}")
+
+    # Telegram: bonding curve milestones (80% and complete only)
+    if stage == "80percent":
+        tg_signal = "80_bonding_curve"
+    elif stage == "complete":
+        tg_signal = "bonding_curve_completed"
+    else:
+        tg_signal = None
+
+    if tg_signal:
+        tg_targets = get_telegram_targets(tg_signal)
+        if tg_targets:
+            tx_data = await get_saved_transaction_metadata(mint, bonding_logger)
+            tg_text = format_bonding_curve(mint, stage, tx_data)
+            for target in tg_targets:
+                await queue_telegram_send(target['chat_id'], target['thread_id'], tg_text, tg_signal, bonding_logger)
 
 # Global momentum cache
 momentum_cache = {}
@@ -1516,6 +1544,14 @@ async def trigger_top_boost_notification(token):
                 await queue_discord_send(channel, embed, "dexscreener_top_boosts", dexscreener_logger, MessagePriority.MEDIUM)
                 dexscreener_logger.info(f"Sent top boost notification for dexscreener_top_boosts to server {server['server_id']}")
 
+    tg_text = format_dexscreener_boost(
+        mint, token_name or 'Unknown', token_symbol or '?', user,
+        token.get('description'), twitter_url, telegram_url, website_url,
+        token.get('totalAmount'), "dexscreener_top_boosts"
+    )
+    for target in get_telegram_targets("dexscreener_top_boosts"):
+        await queue_telegram_send(target['chat_id'], target['thread_id'], tg_text, "dexscreener_top_boosts", dexscreener_logger)
+
 
 async def fetch_dexscreener_boosted_tokens():
     """Fetch the latest boosted tokens from DexScreener API"""
@@ -1625,6 +1661,34 @@ async def trigger_dexscreener_alert(data):
             if channel:
                 await queue_discord_send(channel, embed, "dexscreener_updates", websocket_logger, MessagePriority.MEDIUM)
                 await asyncio.sleep(1)
+
+    mint = data['tokenAddress']
+    tg_name, tg_symbol, tg_user = 'Unknown', '?', None
+    tg_twitter, tg_telegram, tg_website = None, None, None
+    if "pump" in mint:
+        tx_data = await get_saved_transaction_metadata(mint, dexscreener_logger)
+        if tx_data:
+            tg_name = tx_data['name']
+            tg_symbol = tx_data['symbol']
+            tg_user = tx_data['user']
+            tg_twitter = tx_data['twitter_url']
+            tg_telegram = tx_data['telegram_url']
+            tg_website = tx_data['website_url']
+    elif "bonk" in mint:
+        tx_data = await get_saved_bonk_metadata(mint)
+        if tx_data:
+            tg_name = tx_data['name']
+            tg_symbol = tx_data['symbol']
+            tg_user = tx_data['user']
+            tg_twitter = tx_data['twitter_url']
+            tg_telegram = tx_data['telegram_url']
+            tg_website = tx_data['website_url']
+    tg_text = format_dexscreener_paid(
+        mint, tg_name, tg_symbol, tg_user,
+        data.get('description'), tg_twitter, tg_telegram, tg_website, data.get('url')
+    )
+    for target in get_telegram_targets("dexscreener_updates"):
+        await queue_telegram_send(target['chat_id'], target['thread_id'], tg_text, "dexscreener_updates", dexscreener_logger)
 
 async def get_metadata(uri):
     """Fetch metadata from IPFS with fallback gateways"""
@@ -1976,6 +2040,14 @@ async def trigger_dexscreener_boosted_embed(token):
                 await queue_discord_send(channel, embed, "dexscreener_boosts", websocket_logger, MessagePriority.MEDIUM)
                 dexscreener_logger.info(f"Sent boost notification for dexscreener_boosts to server {server['server_id']}")
 
+    tg_text = format_dexscreener_boost(
+        mint, token_name or 'Unknown', token_symbol or '?', user,
+        token.get('description'), twitter_url, telegram_url, website_url,
+        token.get('totalAmount'), "dexscreener_boosts"
+    )
+    for target in get_telegram_targets("dexscreener_boosts"):
+        await queue_telegram_send(target['chat_id'], target['thread_id'], tg_text, "dexscreener_boosts", dexscreener_logger)
+
 
 def calculate_time_to_bonding(created_timestamp: float) -> str:
     """Calculate time elapsed from token creation to bonding milestone"""
@@ -2170,6 +2242,11 @@ async def handle_message(data):
             #websocket_logger.info("QUEUED ALL TOKEN EMBED")
             #await asyncio.sleep(1)  # Add 1 second delay between sends
 
+    # Telegram: all_tokens
+    tg_text = format_all_tokens(enriched_data)
+    for target in get_telegram_targets('all_tokens'):
+        await queue_telegram_send(target['chat_id'], target['thread_id'], tg_text, 'all_tokens', websocket_logger, delay_seconds=target.get('delay_seconds', 0))
+
     # 5.
     if three_socials:
         for server in servers['allowed_servers']:
@@ -2177,6 +2254,11 @@ async def handle_message(data):
             channel = get_channel(server['server_id'], 'new_coin_with_socials')
             if channel:
                 await queue_discord_send(channel, embed, "new_coin_with_socials", websocket_logger, MessagePriority.HIGH)
+
+        # Telegram: new_coin_with_socials
+        tg_text_socials = format_new_coin_with_socials(enriched_data)
+        for target in get_telegram_targets('new_coin_with_socials'):
+            await queue_telegram_send(target['chat_id'], target['thread_id'], tg_text_socials, 'new_coin_with_socials', websocket_logger)
 
 def decode_create_instruction(ix_data, ix_def, accounts):
     args = {}
@@ -2331,15 +2413,21 @@ async def listen_and_decode_create():
                                                         #websocket_logger.info(f"Pump discriminator: {discriminator}")
                                                         if discriminator in create_discriminators:
                                                             create_ix = next(instr for instr in idl['instructions'] if instr['name'] == 'create')
-
-                                                            # Add validation here
-                                                            if all(index < len(transaction.message.account_keys) for index in ix.accounts):
-                                                                account_keys = [str(transaction.message.account_keys[index]) for index in ix.accounts]
+                                                            try:
+                                                                n_keys = len(transaction.message.account_keys)
+                                                                account_keys = [
+                                                                    str(transaction.message.account_keys[i]) if i < n_keys else None
+                                                                    for i in ix.accounts
+                                                                ]
                                                                 decoded_args = decode_create_instruction(ix_data, create_ix, account_keys)
+                                                                if not decoded_args.get('user') or decoded_args['user'] == 'None':
+                                                                    decoded_args['user'] = str(transaction.message.account_keys[0])
                                                                 await handle_message(decoded_args)
                                                                 #websocket_logger.info(f"PUMP TOKEN CREATED")
                                                                 print(json.dumps(decoded_args, indent=2))
                                                                 print("--------------------")
+                                                            except Exception as e:
+                                                                websocket_logger.error(f"Failed to decode/handle create (discriminator {discriminator}): {e}", exc_info=True)
 
                         elif 'result' in data:
                             websocket_logger.info("Subscription confirmed")
@@ -2375,6 +2463,7 @@ async def listen_and_decode_create():
                             "no close frame sent",
                             "connection closed",
                             "1011",
+                            "1001",
                             "1006",
                             "connection lost"
                         ]
@@ -2401,6 +2490,7 @@ async def on_ready():
     #Get message queue 
     message_queue = get_message_queue()
     await ensure_queue_processing()
+    await ensure_telegram_queue_processing()
 
     asyncio.create_task(monitor_memory_usage(websocket_logger))
 

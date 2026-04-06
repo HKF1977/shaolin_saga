@@ -30,6 +30,8 @@ from solders.pubkey import Pubkey
 from collections import deque
 from time import time as current_time
 from rate_limiter import queue_discord_send, MessagePriority, get_message_queue, monitor_rate_limits, ensure_queue_processing, monitor_memory_usage
+from telegram_sender import queue_telegram_send, get_telegram_targets, ensure_telegram_queue_processing
+from telegram_formatter import format_whale_large_trade, format_wallet_tracker, format_based_dev
 
 #Get vars from config.py
 sys.path.append('/home/shaolin_saga/config')
@@ -192,40 +194,51 @@ async def check_tracked_wallet(user_address):
         return None
 '''
 
+# In-memory cache: {server_id: {'mtime': float, 'index': {address: wallet_info}}}
+_wallet_cache = {}
+
+def _load_wallet_cache(server_id, wallets_file):
+    """Reload the wallet file into cache only if it has changed on disk."""
+    try:
+        mtime = os.path.getmtime(wallets_file)
+    except OSError:
+        return
+    cached = _wallet_cache.get(server_id)
+    if cached and cached['mtime'] == mtime:
+        return  # Still fresh
+    with open(wallets_file, 'r') as f:
+        data = json.load(f)
+    index = {
+        w['wallet']: {
+            'name': w.get('name', 'Unknown'),
+            'socials': w.get('socials', ''),
+            'wallet': w['wallet'],
+            'server_id': server_id
+        }
+        for w in data.get('wallets', [])
+        if w.get('wallet')
+    }
+    _wallet_cache[server_id] = {'mtime': mtime, 'index': index}
+    wallet_logger.info(f"Reloaded wallet cache for server {server_id}: {len(index)} wallets")
+
+
 async def check_tracked_wallet(user_address):
     """
-    Check if a wallet address is in our tracked wallets list
-    Returns the wallet data if found, None otherwise
+    Check if a wallet address is in our tracked wallets list.
+    Uses an mtime-based in-memory cache to avoid per-transaction file I/O.
+    Returns the wallet data if found, None otherwise.
     """
     try:
-        os.makedirs('/home/shaolin_saga/data/tracked_wallets', exist_ok=True)
-
-        # Loop through all server-specific wallet files
         for server in servers['allowed_servers']:
             server_id = server['server_id']
-            #wallet_logger.debug(f"Tracked wallets server_id: {server_id}")
-            
-            wallets_file = f'/home/shaolin_saga/data/tracked_wallets/known_wallets_{server_id}.json'
-
-            # Skip if file doesn't exist for this server
+            wallets_file = f'/home/shaolin_saga/data/pump_data/tracked_wallets/known_wallets_{server_id}.json'
             if not os.path.exists(wallets_file):
                 continue
-
-            # Load and check this server's wallets
-            with open(wallets_file, 'r') as f:
-                tracked_wallets_data = json.load(f)
-
-            for wallet in tracked_wallets_data.get('wallets', []):
-                if wallet.get('wallet') == user_address:
-                    return {
-                        'name': wallet.get('name', 'Unknown'),
-                        'socials': wallet.get('socials', ''),
-                        'wallet': wallet.get('wallet'),
-                        'server_id': server_id  # Track which server owns this wallet
-                    }
-
+            _load_wallet_cache(server_id, wallets_file)
+            wallet_info = _wallet_cache.get(server_id, {}).get('index', {}).get(user_address)
+            if wallet_info:
+                return wallet_info
         return None
-
     except Exception as e:
         wallet_logger.error(f"Error checking tracked wallet {user_address}: {str(e)}")
         return None
@@ -372,6 +385,17 @@ async def process_based_dev_alerts(users):
                         channel = get_channel(server['server_id'], 'based_dev')
                         if channel:
                             await queue_discord_send(channel, embed, "based_dev", user_logger, MessagePriority.HIGH)
+
+                    mint = data['successful_tokens'][-1]['mint'] if data['successful_tokens'] else data['total_tokens'][0]
+                    tx_data = await get_saved_transaction_metadata(mint, user_logger)
+                    if tx_data:
+                        tg_text = format_based_dev(
+                            user, mint, tx_data.get('name', 'Unknown'), tx_data.get('symbol', '?'),
+                            total_tokens, successful_tokens, performance_score,
+                            tx_data.get('twitter_url'), tx_data.get('telegram_url'), tx_data.get('website_url')
+                        )
+                        for target in get_telegram_targets("based_dev"):
+                            await queue_telegram_send(target['chat_id'], target['thread_id'], tg_text, "based_dev", user_logger)
 
 
 def save_enhanced_user_data(user, data):
@@ -628,7 +652,13 @@ async def trigger_trade_alert(trade_data):
         if channel:
             websocket_secondary_logger.info(f"{channel_type}")
             await queue_discord_send(channel, embed, channel_type, websocket_secondary_logger, MessagePriority.HIGH)
-            await asyncio.sleep(0.5)  # Small delay between servers  
+            await asyncio.sleep(0.5)  # Small delay between servers
+
+    # Telegram: whale_trades and large_trades (not pre_pump)
+    if channel_type in ("whale_trades", "large_trades"):
+        tg_text = format_whale_large_trade(trade_data, token_name, token_symbol, mint, channel_type)
+        for target in get_telegram_targets(channel_type):
+            await queue_telegram_send(target['chat_id'], target['thread_id'], tg_text, channel_type, websocket_secondary_logger)
 
 
 async def trigger_wallet_tracker_alert(trade_data):
@@ -704,7 +734,15 @@ async def trigger_wallet_tracker_alert(trade_data):
             if channel:
                 await queue_discord_send(channel, embed, "wallet_tracker", wallet_logger, MessagePriority.LOW)
                 wallet_logger.info(f"Sent wallet tracker alert for {wallet_address} to server {server['server_id']}")
-    
+
+        tg_text = format_wallet_tracker(
+            mint, token_name, token_symbol,
+            wallet_name, wallet_address, twitter_url,
+            trade_type, trade_data['sol_amount'], trade_data['signature']
+        )
+        for target in get_telegram_targets("wallet_tracker"):
+            await queue_telegram_send(target['chat_id'], target['thread_id'], tg_text, "wallet_tracker", wallet_logger)
+
     except Exception as e:
         wallet_logger.error(f"Error sending wallet tracker alert: {str(e)}")
 
@@ -981,7 +1019,7 @@ async def listen_and_decode_trades():
 
                         # Add validation before parsing
                         if not response or not response.strip():
-                            websocket-secondary_logger.warning("Received empty response, skipping...")
+                            websocket_secondary_logger.warning("Received empty response, skipping...")
                             continue
 
                         data = json.loads(response)
@@ -1097,6 +1135,7 @@ async def listen_and_decode_trades():
                             "no close frame sent",
                             "connection closed",
                             "1011",
+                            "1001",
                             "1006",
                             "connection lost"
                         ]
@@ -1125,7 +1164,8 @@ async def on_ready():
     #Get message queue
     message_queue = get_message_queue()
     await ensure_queue_processing()
-   
+    await ensure_telegram_queue_processing()
+
     asyncio.create_task(monitor_memory_usage(websocket_secondary_logger))
     bot.loop.create_task(listen_and_decode_trades())
     bot.loop.create_task(message_queue.process_queue())
