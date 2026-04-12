@@ -30,7 +30,10 @@
         "wallet_tracker": 617,
         "based_dev": 1115,
         "80_bonk_bonding": 1116,
-        "bonk_bonding_completed": 1117
+        "bonk_bonding_completed": 1117,
+        "polymarket_alerts": 0,
+        "polymarket_signals": 0,
+        "polymarket_daily": 0
       }
     }
   ]
