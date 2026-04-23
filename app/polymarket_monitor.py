@@ -348,7 +348,7 @@ class PolymarketMonitor:
                 del s[:len(s) - 200]
         vol = m.get("volume24hr") or 0
         sv = self._vol_snaps.setdefault(slug, [])
-        sv.append({"v": vol, "t": now})
+        sv.append({"v": vol, "v1wk": m.get("volume1wk") or 0, "t": now})
         if len(sv) > 200:
             del sv[:len(sv) - 200]
 
@@ -376,27 +376,23 @@ class PolymarketMonitor:
                 return {"d": float(ch1h), "h": 1.0, "f": price - float(ch1h), "t": price, "source": "api"}
         return None
 
-    def _vol_rate(self, slug: str) -> Optional[Tuple[float, float]]:
-        """Returns (current_hourly_rate, avg_hourly_rate) or None."""
-        snaps = self._vol_snaps.get(slug)
-        if not snaps or len(snaps) < 2:
+    def _vol_rate(self, m: dict) -> Optional[Tuple[float, float]]:
+        """
+        Returns (vol_24h, avg_daily_vol) or None.
+
+        Uses volume24hr directly as the current signal and volume1wk/7 as the
+        stable weekly baseline. Avoids the rolling-window-delta approach which
+        produced unreliable results because volume24hr is not a counter — it's
+        a sliding window that can decrease when old trades fall off.
+        """
+        vol24h = m.get("volume24hr") or 0
+        vol1wk = m.get("volume1wk") or 0
+        if vol24h < 1 or vol1wk < 7:
             return None
-        now = datetime.now(timezone.utc)
-        recent = [s for s in snaps if s["t"] >= now - timedelta(minutes=30)]
-        if len(recent) < 2:
+        avg_daily = vol1wk / 7
+        if avg_daily < 1_000:
             return None
-        vol_delta = recent[-1]["v"] - recent[0]["v"]
-        hrs = (recent[-1]["t"] - recent[0]["t"]).total_seconds() / 3600
-        if hrs < 0.01:
-            return None
-        current = max(0, vol_delta / hrs)
-        # Use weekly volume for a more stable baseline (avoids false surges on
-        # already-high-volume days where 24h avg is inflated)
-        vol1wk = snaps[-1].get("v1wk") or snaps[-1]["v"]
-        avg = (vol1wk / (7 * 24)) if vol1wk > 0 else (snaps[-1]["v"] / 24)
-        if avg < 1:
-            return None
-        return current, avg
+        return vol24h, avg_daily
 
     def _cleanup(self):
         now = datetime.now(timezone.utc)
@@ -415,7 +411,7 @@ class PolymarketMonitor:
     # ═══════════════════════════════════════════════════════════════════════
 
     def _d_vsurge(self, mks: List[dict]) -> List[tuple]:
-        """ALERT: Volume surge — current hourly rate 5x+ the baseline."""
+        """ALERT: Volume surge — today's volume 5x+ the weekly daily average."""
         out = []
         for m in mks:
             slug = m.get("slug", "")
@@ -423,12 +419,10 @@ class PolymarketMonitor:
             liq = m.get("liquidityNum") or 0
             if vol < 10_000 or liq < 2_000:
                 continue
-            rates = self._vol_rate(slug)
+            rates = self._vol_rate(m)
             if not rates:
                 continue
             cur, avg = rates
-            if avg < 100:
-                continue
             mult = cur / avg
             if mult < 5:
                 continue
@@ -444,11 +438,10 @@ class PolymarketMonitor:
                 value=f"```{oc} at {_pct(price)}  {UP if ch > 0 else DN} {_sp(ch)} (24h)```",
                 inline=False,
             )
-            e.add_field(name="\u26a1 Vol/hr (now)", value=f"**{_usd(cur)}**", inline=True)
-            e.add_field(name="\u26a1 Vol/hr (avg)", value=f"**{_usd(avg)}**", inline=True)
-            e.add_field(name="\U0001f4b0 Vol 24h", value=f"**{_usd(vol)}**", inline=True)
+            e.add_field(name="\u26a1 Vol (24h)", value=f"**{_usd(cur)}**", inline=True)
+            e.add_field(name="\u26a1 Avg Vol/day", value=f"**{_usd(avg)}**", inline=True)
             e.add_field(name="\U0001f4a7 Liquidity", value=f"**{_usd(liq)}**", inline=True)
-            e.add_field(name="Surge", value=f"```{mult:.1f}x normal volume rate```", inline=False)
+            e.add_field(name="Surge", value=f"```{mult:.1f}x avg daily volume```", inline=False)
             ct = _crypto_tag(q)
             if ct:
                 e.add_field(name="Crypto Impact", value=f"```\n{ct}```", inline=False)
