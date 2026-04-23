@@ -102,6 +102,25 @@ CD = "\U0001f4c9"
 
 # ── HELPERS ───────────────────────────────────────────────────────────────────
 
+def _market_url(m: dict) -> str:
+    """
+    Build the best available Polymarket URL for a market dict.
+    Prefers the parent event slug from events[0] over the market-level slug,
+    which avoids linking to individual game markets (e.g. -game1) instead of
+    the parent match event page.
+    """
+    events = m.get("events") or []
+    if events and isinstance(events, list):
+        parent_slug = events[0].get("slug", "") if isinstance(events[0], dict) else ""
+        if parent_slug:
+            return f"https://polymarket.com/event/{parent_slug}"
+
+    slug = m.get("slug", "")
+    if not slug:
+        return "https://polymarket.com"
+    return f"https://polymarket.com/event/{slug}"
+
+
 def _parse_prices(m: dict) -> List[float]:
     try:
         return [float(p) for p in json.loads(m.get("outcomePrices") or "[]")]
@@ -261,11 +280,10 @@ class PolymarketMonitor:
 
     def _embed(self, title: str, tier: Tier, m: Optional[dict] = None) -> discord.Embed:
         cfg = TIER_CFG[tier]
-        slug = m.get("slug", "") if m else ""
         e = discord.Embed(
             title=f"{cfg['emoji']} {title}",
             colour=cfg["colour"],
-            url=f"https://polymarket.com/event/{slug}" if slug else None,
+            url=_market_url(m) if m else None,
             timestamp=datetime.now(timezone.utc),
         )
         e.set_author(name="Shaolin Saga", icon_url=self.icon_url)
@@ -434,7 +452,7 @@ class PolymarketMonitor:
             ct = _crypto_tag(q)
             if ct:
                 e.add_field(name="Crypto Impact", value=f"```\n{ct}```", inline=False)
-            e.add_field(name="Links", value=f"[POLYMARKET](https://polymarket.com/event/{slug})", inline=False)
+            e.add_field(name="Links", value=f"[POLYMARKET]({_market_url(m)})", inline=False)
             out.append(("alerts", Tier.ALERT, e, m))
             self._mark(slug, "vsurge", price)
         return sorted(out, key=lambda x: x[1], reverse=True)[:6]
@@ -484,7 +502,7 @@ class PolymarketMonitor:
             ct = _crypto_tag(q)
             if ct:
                 e.add_field(name="Crypto Impact", value=f"```\n{ct}```", inline=False)
-            e.add_field(name="Links", value=f"[POLYMARKET](https://polymarket.com/event/{slug})", inline=False)
+            e.add_field(name="Links", value=f"[POLYMARKET]({_market_url(m)})", inline=False)
             ch_name = "alerts" if tier == Tier.ALERT else "signals"
             out.append((ch_name, tier, e, m))
             self._mark(slug, "reversal", price)
@@ -529,7 +547,7 @@ class PolymarketMonitor:
             )
             e.add_field(name="\U0001f4b0 Vol 24h", value=f"**{_usd(vol)}**", inline=True)
             e.add_field(name="\U0001f4a7 Liquidity", value=f"**{_usd(liq)}**", inline=True)
-            e.add_field(name="Links", value=f"[POLYMARKET](https://polymarket.com/event/{slug})", inline=False)
+            e.add_field(name="Links", value=f"[POLYMARKET]({_market_url(m)})", inline=False)
             channel = "alerts" if tier == Tier.ALERT else "signals"
             out.append((channel, tier, e, m))
             self._mark(slug, "macro", price)
@@ -590,7 +608,7 @@ class PolymarketMonitor:
                 value=f"```\nPolymarket crowd {feel} on {asset}. {vnote}```",
                 inline=False,
             )
-            e.add_field(name="Links", value=f"[POLYMARKET](https://polymarket.com/event/{slug})", inline=False)
+            e.add_field(name="Links", value=f"[POLYMARKET]({_market_url(m)})", inline=False)
             channel = "alerts" if tier == Tier.ALERT else "signals"
             out.append((channel, tier, e, m))
             self._mark(slug, "consensus", price)
@@ -640,7 +658,7 @@ class PolymarketMonitor:
             ct = _crypto_tag(q)
             if ct:
                 e.add_field(name="Crypto Impact", value=f"```\n{ct}```", inline=False)
-            e.add_field(name="Links", value=f"[POLYMARKET](https://polymarket.com/event/{slug})", inline=False)
+            e.add_field(name="Links", value=f"[POLYMARKET]({_market_url(m)})", inline=False)
             channel = "alerts" if tier == Tier.ALERT else "signals"
             out.append((channel, tier, e, m))
             self._mark(slug, "velocity", price)
@@ -683,7 +701,7 @@ class PolymarketMonitor:
                 tags.append("\u2705 Fast traction")
             if tags:
                 e.add_field(name="Indicators", value="  ".join(tags), inline=False)
-            e.add_field(name="Links", value=f"[POLYMARKET](https://polymarket.com/event/{slug})", inline=False)
+            e.add_field(name="Links", value=f"[POLYMARKET]({_market_url(m)})", inline=False)
             channel = "alerts" if tier == Tier.ALERT else "signals"
             out.append((channel, tier, e, m))
             self._mark(slug, "early", price)
@@ -731,7 +749,7 @@ class PolymarketMonitor:
             if days < float("inf"):
                 e.add_field(name="\U0001f4c5 Deadline", value=f"**{days:.0f} days**", inline=True)
             e.add_field(name="Alpha", value=f"```\n{alpha}```", inline=False)
-            e.add_field(name="Links", value=f"[POLYMARKET](https://polymarket.com/event/{slug})", inline=False)
+            e.add_field(name="Links", value=f"[POLYMARKET]({_market_url(m)})", inline=False)
             out.append(("signals", tier, e, m))
             self._mark(slug, "airdrop", price)
         return sorted(out, key=lambda x: x[1], reverse=True)[:5]
@@ -778,7 +796,7 @@ class PolymarketMonitor:
                    "before sizing.```"),
             inline=False,
         )
-        e.add_field(name="Links", value=f"[POLYMARKET](https://polymarket.com/event/{plays[0].get('slug', '')})", inline=False)
+        e.add_field(name="Links", value=f"[POLYMARKET]({_market_url(plays[0])})", inline=False)
         return [("plays", Tier.WATCH, e, plays[0])]
 
     def _d_contrarian(self, mks: List[dict]) -> List[tuple]:
@@ -817,7 +835,7 @@ class PolymarketMonitor:
             ct = _crypto_tag(q)
             if ct:
                 e.add_field(name="Crypto Impact", value=f"```\n{ct}```", inline=False)
-            e.add_field(name="Links", value=f"[POLYMARKET](https://polymarket.com/event/{slug})", inline=False)
+            e.add_field(name="Links", value=f"[POLYMARKET]({_market_url(m)})", inline=False)
             out.append(("plays", tier, e, m))
             self._mark(slug, "contrarian", price)
         return sorted(out, key=lambda x: x[1], reverse=True)[:4]
@@ -868,7 +886,7 @@ class PolymarketMonitor:
                        f"aligning across related markets often precedes real movement.```"),
                 inline=False,
             )
-            e.add_field(name="Links", value=f"[POLYMARKET](https://polymarket.com/event/{top3[0].get('slug', '')})", inline=False)
+            e.add_field(name="Links", value=f"[POLYMARKET]({_market_url(top3[0])})", inline=False)
             out.append(("plays", tier, e, top3[0]))
             self._mark(cat, "convergence", aln)
         return sorted(out, key=lambda x: x[1], reverse=True)[:3]
