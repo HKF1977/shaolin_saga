@@ -1,0 +1,23 @@
+{
+  "macro": {
+    "fed":           { "assets": "BTC, ETH, risk assets",            "read": "Rate cuts → bullish, holds/hikes → bearish" },
+    "interest rate": { "assets": "BTC, ETH, risk assets",            "read": "Cuts bullish, hikes bearish" },
+    "iran":          { "assets": "BTC, oil plays",                   "read": "Escalation → short-term bearish, flight to safety" },
+    "israel":        { "assets": "BTC, oil, defence tokens",         "read": "Conflict escalation → volatility spike" },
+    "ukraine":       { "assets": "Energy tokens, BTC",               "read": "Escalation → risk-off, ceasefire → risk-on" },
+    "russia":        { "assets": "Energy, sanctions-exposed tokens", "read": "Sanctions → volatility" },
+    "tariff":        { "assets": "All risk assets, DeFi",            "read": "New tariffs → bearish, removal → bullish" },
+    "recession":     { "assets": "BTC, stablecoins, DeFi yields",    "read": "Recession fears → risk-off, then BTC narrative" },
+    "sec":           { "assets": "Altcoins, DeFi tokens",            "read": "Enforcement → bearish for named tokens" },
+    "etf":           { "assets": "BTC, ETH, SOL",                    "read": "Approval → bullish, rejection → bearish" },
+    "regulation":    { "assets": "DeFi, CEX tokens, stablecoins",    "read": "Clarity → bullish, crackdowns → bearish" },
+    "trump":         { "assets": "Crypto broadly, DeFi",             "read": "Pro-crypto policy → bullish" },
+    "inflation":     { "assets": "BTC, stablecoins",                 "read": "High inflation → BTC hedge narrative strengthens" },
+    "war":           { "assets": "BTC, defence, oil",                "read": "New conflict → volatility spike, safe haven flows" },
+    "election":      { "assets": "Regulation-sensitive tokens",      "read": "Pro-crypto candidate → bullish" },
+    "china":         { "assets": "BTC, mining tokens",               "read": "Ban → bearish, easing → bullish" }
+  },
+  "crypto":  ["bitcoin", "btc", "ethereum", "eth", "solana", "sol", "xrp", "bnb", "dogecoin", "doge", "hyperliquid", "crypto", "defi"],
+  "airdrop": ["airdrop", "token launch", "tge", "listing"],
+  "price":   ["price", "hit", "above", "below", "reach", "exceed"]
+}

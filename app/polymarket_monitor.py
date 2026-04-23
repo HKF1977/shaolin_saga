@@ -19,6 +19,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from datetime import datetime, timezone, timedelta
 from enum import IntEnum
 from typing import Dict, List, Optional, Tuple
@@ -66,33 +67,34 @@ TELEGRAM_SIGNAL = {
 }
 
 
-# ── MACRO KEYWORDS → CRYPTO IMPACT ───────────────────────────────────────────
+# ── KEYWORD CONFIG ───────────────────────────────────────────────────────────
+# Keywords and crypto impact copy live in config/polymarket_keywords.json.
+# Edit that file to add/remove keywords without touching Python.
 
+with open('/home/shaolin_saga/config/polymarket_keywords.json', 'r') as _f:
+    _kw = json.load(_f)
+
+# MACRO: keyword → (assets, read) tuple — preserves existing helper interface
 MACRO: Dict[str, Tuple[str, str]] = {
-    "fed":           ("BTC, ETH, risk assets",           "Rate cuts → bullish, holds/hikes → bearish"),
-    "interest rate": ("BTC, ETH, risk assets",           "Cuts bullish, hikes bearish"),
-    "iran":          ("BTC, oil plays",                  "Escalation → short-term bearish, flight to safety"),
-    "israel":        ("BTC, oil, defence tokens",        "Conflict escalation → volatility spike"),
-    "ukraine":       ("Energy tokens, BTC",              "Escalation → risk-off, ceasefire → risk-on"),
-    "russia":        ("Energy, sanctions-exposed tokens", "Sanctions → volatility"),
-    "tariff":        ("All risk assets, DeFi",           "New tariffs → bearish, removal → bullish"),
-    "recession":     ("BTC, stablecoins, DeFi yields",   "Recession fears → risk-off, then BTC narrative"),
-    "sec":           ("Altcoins, DeFi tokens",           "Enforcement → bearish for named tokens"),
-    "etf":           ("BTC, ETH, SOL",                   "Approval → bullish, rejection → bearish"),
-    "regulation":    ("DeFi, CEX tokens, stablecoins",   "Clarity → bullish, crackdowns → bearish"),
-    "trump":         ("Crypto broadly, DeFi",            "Pro-crypto policy → bullish"),
-    "inflation":     ("BTC, stablecoins",                "High inflation → BTC hedge narrative strengthens"),
-    "war":           ("BTC, defence, oil",               "New conflict → volatility spike, safe haven flows"),
-    "election":      ("Regulation-sensitive tokens",     "Pro-crypto candidate → bullish"),
-    "china":         ("BTC, mining tokens",              "Ban → bearish, easing → bullish"),
+    k: (v['assets'], v['read']) for k, v in _kw['macro'].items()
 }
+CRYPTO_KW: List[str] = _kw['crypto']
+AIRDROP_KW: List[str] = _kw['airdrop']
+PRICE_KW: List[str] = _kw['price']
 
-CRYPTO_KW = [
-    "bitcoin", "btc", "ethereum", "eth", "solana", "sol", "xrp", "bnb",
-    "dogecoin", "doge", "hyperliquid", "crypto", "defi",
-]
-AIRDROP_KW = ["airdrop", "token launch", "tge", "listing"]
-PRICE_KW = ["price", "hit", "above", "below", "reach", "exceed"]
+# Pre-compiled word-boundary patterns — built once at import, reused every scan.
+_MACRO_RE: Dict[str, re.Pattern] = {
+    kw: re.compile(r'\b' + re.escape(kw) + r'\b') for kw in MACRO
+}
+_CRYPTO_RE: re.Pattern = re.compile(
+    r'\b(' + '|'.join(re.escape(k) for k in CRYPTO_KW) + r')\b'
+)
+_AIRDROP_RE: re.Pattern = re.compile(
+    r'\b(' + '|'.join(re.escape(k) for k in AIRDROP_KW) + r')\b'
+)
+_PRICE_RE: re.Pattern = re.compile(
+    r'\b(' + '|'.join(re.escape(k) for k in PRICE_KW) + r')\b'
+)
 
 UP = "\U0001f53c"
 DN = "\U0001f53b"
@@ -183,19 +185,19 @@ def _days_until(s: Optional[str]) -> float:
 
 
 def _is_crypto(q: str) -> bool:
-    return any(k in q for k in CRYPTO_KW)
+    return bool(_CRYPTO_RE.search(q))
 
 
 def _is_price_market(q: str) -> bool:
-    return any(k in q for k in CRYPTO_KW) and any(w in q for w in PRICE_KW)
+    return bool(_CRYPTO_RE.search(q)) and bool(_PRICE_RE.search(q))
 
 
 def _is_airdrop(q: str) -> bool:
-    return any(k in q for k in AIRDROP_KW)
+    return bool(_AIRDROP_RE.search(q))
 
 
 def _macro_hit(q: str) -> Optional[Tuple[str, Tuple[str, str]]]:
-    return next(((kw, ctx) for kw, ctx in MACRO.items() if kw in q), None)
+    return next(((kw, ctx) for kw, ctx in MACRO.items() if _MACRO_RE[kw].search(q)), None)
 
 
 def _crypto_tag(q: str) -> Optional[str]:
