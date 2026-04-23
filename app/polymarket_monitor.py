@@ -468,11 +468,33 @@ class PolymarketMonitor:
             if len(w) < 5:
                 continue
             prices = [s["p"] for s in w]
-            mid = len(prices) // 2
-            first = prices[mid] - prices[0]
-            second = prices[-1] - prices[mid]
-            if first * second >= 0:
+
+            # Find the actual local peak and trough rather than using the
+            # midpoint, so swing magnitude and pivot price are accurate.
+            peak_idx = prices.index(max(prices))
+            trough_idx = prices.index(min(prices))
+
+            # Peak reversal: climbed to a real high then came back down.
+            # Trough reversal: dropped to a real low then bounced back up.
+            # The pivot must not be at either end of the window (otherwise
+            # it's just a continuing move, not a reversal).
+            best = None
+            if 0 < peak_idx < len(prices) - 1:
+                first = prices[peak_idx] - prices[0]
+                second = prices[-1] - prices[peak_idx]
+                if first > 0 and second < 0:
+                    best = (first, second, peak_idx, "climbed then reversed down")
+            if 0 < trough_idx < len(prices) - 1:
+                first = prices[trough_idx] - prices[0]
+                second = prices[-1] - prices[trough_idx]
+                if first < 0 and second > 0:
+                    candidate = (first, second, trough_idx, "dropped then reversed up")
+                    if best is None or abs(first) + abs(second) > abs(best[0]) + abs(best[1]):
+                        best = candidate
+
+            if not best:
                 continue
+            first, second, pivot_idx, direction = best
             swing = abs(first) + abs(second)
             if swing < 0.15:
                 continue
@@ -480,14 +502,13 @@ class PolymarketMonitor:
             if not self._ok(slug, "reversal", price, 0.12):
                 continue
             q = (m.get("question") or "").lower()
-            direction = "climbed then reversed down" if first > 0 else "dropped then reversed up"
             tier = Tier.ALERT if swing >= 0.20 and vol >= 50_000 else Tier.SIGNAL
 
             e = self._embed(f"ODDS REVERSAL — {m.get('question', '')[:50]}", tier, m)
             e.add_field(
                 name="Reversal",
                 value=(f"```{direction}\n"
-                       f"{_pct(prices[0])} → {_pct(prices[mid])} → "
+                       f"{_pct(prices[0])} → {_pct(prices[pivot_idx])} → "
                        f"{_pct(prices[-1])} ({_sp(second)})```"),
                 inline=False,
             )
