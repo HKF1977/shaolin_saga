@@ -426,9 +426,10 @@ class PolymarketMonitor:
             mult = cur / avg
             if mult < 5:
                 continue
-            price, oc = _top(m)
-            if not self._ok(slug, "vsurge", price, 0.08):
+            last_vsurge = self._last_sig.get(f"{slug}:vsurge")
+            if last_vsurge and (datetime.now(timezone.utc) - last_vsurge["t"]).total_seconds() < 7200:
                 continue
+            price, oc = _top(m)
             ch = m.get("oneDayPriceChange") or 0
             q = (m.get("question") or "").lower()
 
