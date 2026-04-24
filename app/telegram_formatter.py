@@ -354,6 +354,89 @@ def format_dexscreener_paid(mint: str, name: str, symbol: str, user: str, descri
     )
 
 
+def format_polymarket_alert(title: str, question: str, consensus: str,
+                            stats: str, crypto_impact: str, url: str,
+                            tier_label: str) -> str:
+    """
+    Formatter for Polymarket ALERT and SIGNAL tier signals
+    (polymarket_alerts and polymarket_signals topics).
+    """
+    emoji = "🔴" if tier_label == "ALERT" else "🟡"
+    impact_section = f"\n📡 <b>Crypto Impact</b>\n{crypto_impact}\n" if crypto_impact else ""
+
+    return (
+        f"{emoji} <b>[{tier_label}] {title}</b>\n\n"
+        f"<i>{question}</i>\n\n"
+        f"📊 {consensus}\n\n"
+        f"{stats}"
+        f"{impact_section}\n"
+        f'<a href="{url}">View on Polymarket</a>'
+    )
+
+
+def format_polymarket_signal(title: str, question: str, consensus: str,
+                             stats: str, read: str, url: str) -> str:
+    """
+    Formatter for Polymarket SIGNAL tier (macro, consensus, airdrop intel).
+    """
+    return (
+        f"🟡 <b>{title}</b>\n\n"
+        f"<i>{question}</i>\n\n"
+        f"📊 {consensus}\n\n"
+        f"{stats}"
+        f"💡 {read}\n\n"
+        f'<a href="{url}">View on Polymarket</a>'
+    )
+
+
+def format_polymarket_daily(movers: list, top_volume: list, resolving: list,
+                             signal_count: int, market_count: int) -> str:
+    """
+    Formatter for the Polymarket daily digest (polymarket_daily topic).
+    movers, top_volume, resolving are lists of market dicts from the Gamma API.
+    """
+    from polymarket_monitor import _top, _pct, _sp, _usd, _days_until, CU, CD
+
+    lines = [f"📊 <b>Polymarket Daily Digest</b>\n"]
+    lines.append(f"<i>{signal_count} signals fired · {market_count} markets tracked</i>\n")
+
+    # Biggest movers
+    if movers:
+        lines.append("\n<b>📈 Biggest Movers</b>")
+        for m in movers[:5]:
+            ch = m.get("oneDayPriceChange") or 0
+            arrow = "▲" if ch > 0 else "▼"
+            price, oc = _top(m)
+            q = (m.get("question") or "")[:45]
+            slug = m.get("slug", "")
+            url = f"https://polymarket.com/event/{slug}"
+            lines.append(f'{arrow} {_sp(ch)}  <a href="{url}">{q}</a> → {oc} {_pct(price)}')
+
+    # Top volume
+    if top_volume:
+        lines.append("\n<b>💰 Top Volume (24h)</b>")
+        for m in top_volume[:5]:
+            vol = m.get("volume24hr") or 0
+            price, oc = _top(m)
+            q = (m.get("question") or "")[:45]
+            slug = m.get("slug", "")
+            url = f"https://polymarket.com/event/{slug}"
+            lines.append(f'{_usd(vol)}  <a href="{url}">{q}</a> → {oc} {_pct(price)}')
+
+    # Resolving soon
+    if resolving:
+        lines.append("\n<b>⏰ Resolving Soon</b>")
+        for m in resolving[:4]:
+            d = _days_until(m.get("endDate") or m.get("endDateIso"))
+            price, oc = _top(m)
+            q = (m.get("question") or "")[:40]
+            slug = m.get("slug", "")
+            url = f"https://polymarket.com/event/{slug}"
+            lines.append(f'{d:.0f}d  <a href="{url}">{q}</a> → {oc} {_pct(price)}')
+
+    return "\n".join(lines)
+
+
 def format_pump_livestream(stream_data: dict) -> str:
     """
     Formatter for pump.fun livestreams (pump_livestreams signal).

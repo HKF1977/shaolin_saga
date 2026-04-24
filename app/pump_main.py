@@ -22,6 +22,7 @@ import aiohttp
 import re
 import bonk_main
 import bonk_bonding_monitor
+import polymarket_main
 from collections import defaultdict
 from utils import analyze_for_bundling, get_token_transactions, get_contract_uri_for_mint, get_top_holders, get_saved_bonk_metadata, get_saved_transaction_metadata, safe_json_read, safe_json_write, safe_file_move, safe_file_exists, safe_file_delete
 from pump_commands import register_commands
@@ -2506,6 +2507,7 @@ async def on_ready():
     threading.Thread(target=pump_livestream_monitor, daemon=True).start()
     bot.loop.create_task(bonk_main.start_monitoring(bot, servers))
     bot.loop.create_task(bonk_bonding_monitor.start_monitoring(bot, servers))
+    bot.loop.create_task(polymarket_main.start_monitoring(bot, servers))
 
     # Sync slash commands
     try:
