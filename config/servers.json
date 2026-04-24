@@ -20,7 +20,6 @@
           "momentum_over_30k": 1266352059876249742,
           "fresh_wallet_buy_1_2_sol": 1266352097994084382,
           "fresh_wallet_buy_2_5_sol": 1266352132848750686,
-          "multiple_fresh_buys": 1266352173973766185,
           "new_coin_with_socials": 1266352209067511839,
           "pump_livestreams": 1266352244794720257,
           "large_trades": 1266352275907936266,
@@ -33,6 +32,10 @@
           "dexscreener_updates": 1341352020510113792,
           "momentum_sub_10k": 1344221890742325258,
 	        "based_dev": 1349681595375816755,
+          "oracle_alerts": 1365238684038725682,
+	        "oracle_plays": 1369232912381251664,
+          "oracle_signals": 1266352173973766185,
+	        "oracle_daily": 1369232981507702814,
 	        "raydium_amm": 1365238684038725682,
 	        "gofundmeme_bonding_curve": 1369232912381251664,
 	        "gofundmeme_fair_launch": 1369232981507702814,
@@ -87,7 +90,12 @@
           "new_bonk_tokens": 1391806847329108059,
           "bonk_80_bonding_curve": 1391807031530491974,
           "bonk_95_bonding_curve": 1391807118885126194,
-          "bonk_bonding_curve_completed": 1391807196068708452
+          "bonk_bonding_curve_completed": 1391807196068708452,
+          "oracle_alerts": 1489673222730416149,
+          "oracle_signals": 1489673541598318712,
+          "oracle_plays": 1489673887318020216,
+          "oracle_daily": 1489674285969576198
+
         },
 	"commands_channel": 1341440003804495932,
 	"admin_channel": 1384805354851930213
