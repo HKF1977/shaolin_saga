@@ -32,13 +32,10 @@
           "dexscreener_updates": 1341352020510113792,
           "momentum_sub_10k": 1344221890742325258,
 	        "based_dev": 1349681595375816755,
-          "oracle_alerts": 1365238684038725682,
+	        "oracle_alerts": 1365238684038725682,
 	        "oracle_plays": 1369232912381251664,
           "oracle_signals": 1266352173973766185,
 	        "oracle_daily": 1369232981507702814,
-	        "raydium_amm": 1365238684038725682,
-	        "gofundmeme_bonding_curve": 1369232912381251664,
-	        "gofundmeme_fair_launch": 1369232981507702814,
 	        "pre_pump": 1387371963277774878,
           "new_bonk_tokens": 1395706986942824498,
           "bonk_80_bonding_curve": 1404158845651259563,
@@ -95,7 +92,6 @@
           "oracle_signals": 1489673541598318712,
           "oracle_plays": 1489673887318020216,
           "oracle_daily": 1489674285969576198
-
         },
 	"commands_channel": 1341440003804495932,
 	"admin_channel": 1384805354851930213
