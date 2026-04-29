@@ -264,7 +264,7 @@ async def process_all_users():
 
     try:
         # 1. Scan active tokens (recent creators)
-        await scan_directory_for_creators('/home/shaolin_saga/data/active_tokens', users)
+        await scan_directory_for_creators('/home/shaolin_saga/data/pump_data/active_tokens', users)
 
         # 2. Scan transaction archive (historical creators)
         #await scan_directory_for_creators('/home/shaolin_saga/data/transaction_archive', users)
@@ -310,7 +310,7 @@ async def scan_directory_for_creators(directory, users):
 async def analyze_creator_performance(users):
     """Check which tokens hit performance milestones"""
     performance_directories = [
-        '/home/shaolin_saga/data/bondingComplete'
+        '/home/shaolin_saga/data/pump_data/bondingComplete'
     ]
 
     for directory in performance_directories:
@@ -364,7 +364,7 @@ async def process_based_dev_alerts(users):
 
         if should_alert:
             # Check if already alerted
-            user_file = f"/home/shaolin_saga/data/power_creators/{user}.json"
+            user_file = f"/home/shaolin_saga/data/pump_data/power_creators/{user}.json"
             already_alerted = False
 
             if os.path.exists(user_file):
@@ -400,8 +400,8 @@ async def process_based_dev_alerts(users):
 
 def save_enhanced_user_data(user, data):
     """Save enhanced power creator data with performance metrics"""
-    os.makedirs('/home/shaolin_saga/data/power_creators', exist_ok=True)
-    filename = f"/home/shaolin_saga/data/power_creators/{user}.json"
+    os.makedirs('/home/shaolin_saga/data/pump_data/power_creators', exist_ok=True)
+    filename = f"/home/shaolin_saga/data/pump_data/power_creators/{user}.json"
 
     save_data = {
         'user': user,
@@ -420,8 +420,8 @@ def save_enhanced_user_data(user, data):
 
 def save_user_data(user, count, mints=None):
     """Save power creator data to file"""
-    os.makedirs('/home/shaolin_saga/data/power_creators', exist_ok=True)
-    filename = f"/home/shaolin_saga/data/power_creators/{user}.json"
+    os.makedirs('/home/shaolin_saga/data/pump_data/power_creators', exist_ok=True)
+    filename = f"/home/shaolin_saga/data/pump_data/power_creators/{user}.json"
 
     data = {
         'user': user,
