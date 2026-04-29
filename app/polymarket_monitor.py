@@ -232,7 +232,7 @@ class PolymarketMonitor:
         self._last_sig: Dict[str, dict] = {}
         self._price_snaps: Dict[str, List[dict]] = {}
         self._vol_snaps: Dict[str, List[dict]] = {}
-        self._today: List[discord.Embed] = []
+        self._today_count: int = 0
         self._last_digest: Optional[str] = None
         self._n: int = 0
 
@@ -253,6 +253,7 @@ class PolymarketMonitor:
             except Exception:
                 pass
         self._last_digest = raw.get("last_digest")
+        self._today_count = int(raw.get("today_count", 0))
         self.logger.info("Polymarket: loaded %d cooldown entries from disk", len(self._last_sig))
 
     def _save_state(self):
@@ -264,6 +265,7 @@ class PolymarketMonitor:
         safe_json_write(STATE_PATH, {
             "last_sig": serialised,
             "last_digest": self._last_digest,
+            "today_count": self._today_count,
         })
 
     # ── LIFECYCLE ──────────────────────────────────────────────────────────
@@ -966,7 +968,7 @@ class PolymarketMonitor:
             title=f"\U0001f4ca Daily Oracle — {ds}",
             colour=gold,
             timestamp=now,
-            description=(f"**{len(self._today)} signals** fired today\n"
+            description=(f"**{self._today_count} signals** fired today\n"
                          f"**{len(mks)}** active markets tracked"),
         )
         hdr.set_author(name="Shaolin Saga", icon_url=self.icon_url)
@@ -1067,7 +1069,7 @@ class PolymarketMonitor:
         tg_targets = get_telegram_targets("polymarket_daily")
         if tg_targets:
             try:
-                text = format_polymarket_daily(movers, topv, res, len(self._today), len(mks))
+                text = format_polymarket_daily(movers, topv, res, self._today_count, len(mks))
                 for target in tg_targets:
                     await queue_telegram_send(
                         target["chat_id"], target["thread_id"], text,
@@ -1101,8 +1103,7 @@ class PolymarketMonitor:
                         + self._d_convergence(mks)
                     )
 
-                    for _, _, e, _ in sigs:
-                        self._today.append(e)
+                    self._today_count += len(sigs)
 
                     if sigs:
                         await self._post(sigs)
@@ -1126,7 +1127,7 @@ class PolymarketMonitor:
                 if now.hour == self.digest_hour_utc and self._last_digest != td:
                     await self._send_digest()
                     self._last_digest = td
-                    self._today = []
+                    self._today_count = 0
                     self._save_state()
             except Exception as e:
                 self.logger.error("Polymarket digest error: %s", e, exc_info=True)
