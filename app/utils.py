@@ -1,6 +1,7 @@
 import asyncio
 import sys
 from solana.rpc.async_api import AsyncClient
+from solana.rpc.types import MemcmpOpts
 from solders.pubkey import Pubkey
 import requests
 import json
@@ -61,42 +62,58 @@ def get_contract_uri_for_mint(mint: str) -> Optional[str]:
         return f"https://solscan.io/token/{mint}"
 
 
+_TOKEN_PROGRAM_ID = Pubkey.from_string("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")
+
 async def get_top_holders(client: AsyncClient, mint: Pubkey, limit: int = 10, max_retries: int = 3, logger=None):
-    """Get top token holders for a given mint"""
+    """Get top token holders for a given mint using getProgramAccounts"""
     TOTAL_SUPPLY = 1000000000  # 1 billion tokens
-    logger.info(f"Get top holders: {mint}")
-    
+
     for attempt in range(max_retries):
         try:
-            response = await client.get_token_largest_accounts(mint)
+            if logger:
+                logger.info(f"Calling getProgramAccounts for mint: {mint}")
 
-            # Check if response has value attribute and is not an error
+            response = await client.get_program_accounts(
+                _TOKEN_PROGRAM_ID,
+                encoding="jsonParsed",
+                filters=[
+                    165,                                      # dataSize: token accounts are always 165 bytes
+                    MemcmpOpts(offset=0, bytes=str(mint))     # mint address sits at offset 0
+                ]
+            )
+
             if not hasattr(response, 'value') or response.value is None:
                 raise ValueError("Invalid response from RPC")
 
             if logger:
                 logger.info(f"Number of accounts found: {len(response.value)}")
-            
-            holders = []
-            for account in response.value:
-                ui_amount = account.amount.ui_amount or 0.0
-                if logger:
-                    logger.info(f"Processing account: {account.address} with ui_amount: {ui_amount}")
-                percentage = (ui_amount / TOTAL_SUPPLY) * 100
-                short_address = f"{str(account.address)[:6]}...{str(account.address)[-4:]}"
-                holders.append((short_address, percentage))
 
-            # Sort by percentage and format display
+            holders = []
+            for keyed_account in response.value:
+                try:
+                    parsed = keyed_account.account.data.parsed
+                    ui_amount = parsed['info']['tokenAmount']['uiAmount'] or 0.0
+                    address = str(keyed_account.pubkey)
+                    percentage = (ui_amount / TOTAL_SUPPLY) * 100
+                    short_address = f"{address[:6]}...{address[-4:]}"
+                    holders.append((short_address, percentage))
+                except (KeyError, AttributeError, TypeError) as parse_err:
+                    if logger:
+                        logger.warning(f"Could not parse account {keyed_account.pubkey}: {parse_err}")
+                    continue
+
             sorted_holders = sorted(holders, key=lambda x: x[1], reverse=True)
             holder_lines = []
             for idx, (addr, pct) in enumerate(sorted_holders[:limit], 1):
                 holder_lines.append(f"{idx}. {addr}: {pct:.2f}%")
-            
+
             return "\n".join(holder_lines)
-            
+
         except Exception as e:
             if logger:
-                logger.error(f"Attempt {attempt + 1} failed: {str(e)}")
+                import traceback
+                logger.error(f"Attempt {attempt + 1} failed: {type(e).__name__}: {str(e)}")
+                logger.error(traceback.format_exc())
             if attempt < max_retries - 1:
                 wait_time = 2 ** attempt
                 #logger.info(f"Retrying in {wait_time} seconds...")
