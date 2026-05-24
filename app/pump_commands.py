@@ -37,17 +37,17 @@ with open('/home/shaolin_saga/config/servers.json', 'r') as server_file:
 def is_commands_channel(interaction: discord.Interaction) -> bool:
     """Check if the interaction is in the designated commands channel for the server"""
     server_id = interaction.guild_id
-    
+
     for server in servers['allowed_servers']:
         if server['server_id'] == server_id:
             if 'commands_channel' in server:
                 commands_channel = server['commands_channel']
+                print(f"[DEBUG] guild={server_id} interaction.channel_id={interaction.channel_id} commands_channel={commands_channel} match={interaction.channel_id == commands_channel}")
                 return interaction.channel_id == commands_channel
             else:
-                # If no commands_channel is specified, allow commands in any channel
                 return True
-    
-    # If server not in allowed_servers, default to False
+
+    print(f"[DEBUG] guild={server_id} not found in allowed_servers")
     return False
 
 def get_commands_channel_mention(guild_id: int) -> str:
