@@ -1164,7 +1164,7 @@ async def on_ready():
     #Get message queue
     message_queue = get_message_queue()
     await ensure_queue_processing()
-    await ensure_telegram_queue_processing()
+    #await ensure_telegram_queue_processing()
 
     asyncio.create_task(monitor_memory_usage(websocket_secondary_logger))
     bot.loop.create_task(listen_and_decode_trades())

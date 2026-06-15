@@ -19,7 +19,7 @@ from typing import Optional
 
 # Import from your config
 sys.path.append('/home/shaolin_saga/config')
-from config import RPC_ENDPOINT, PUMP_PROGRAM, LAMPORTS_PER_SOL
+from config import RPC_ENDPOINT, PUMP_PROGRAM, LAMPORTS_PER_SOL, TOP_HOLDERS_RPC
 
 # Custom JSON Encoder to handle special objects
 class CustomJSONEncoder(json.JSONEncoder):
@@ -61,46 +61,43 @@ def get_contract_uri_for_mint(mint: str) -> Optional[str]:
         return f"https://solscan.io/token/{mint}"
 
 
+_PUMP_TOTAL_SUPPLY = 1_000_000_000  # 1B tokens (UI amount, not raw)
+
 async def get_top_holders(client: AsyncClient, mint: Pubkey, limit: int = 10, max_retries: int = 3, logger=None):
-    """Get top token holders for a given mint"""
-    TOTAL_SUPPLY = 1000000000  # 1 billion tokens
-    logger.info(f"Get top holders: {mint}")
-    
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "getTokenLargestAccounts",
+        "params": [str(mint)]
+    }
+
     for attempt in range(max_retries):
         try:
-            response = await client.get_token_largest_accounts(mint)
+            async with aiohttp.ClientSession() as session:
+                async with session.post(TOP_HOLDERS_RPC, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    result = await resp.json()
 
-            # Check if response has value attribute and is not an error
-            if not hasattr(response, 'value') or response.value is None:
-                raise ValueError("Invalid response from RPC")
+            if "error" in result:
+                raise ValueError(f"RPC error: {result['error']}")
 
-            if logger:
-                logger.info(f"Number of accounts found: {len(response.value)}")
-            
-            holders = []
-            for account in response.value:
-                ui_amount = account.amount.ui_amount or 0.0
-                if logger:
-                    logger.info(f"Processing account: {account.address} with ui_amount: {ui_amount}")
-                percentage = (ui_amount / TOTAL_SUPPLY) * 100
-                short_address = f"{str(account.address)[:6]}...{str(account.address)[-4:]}"
-                holders.append((short_address, percentage))
-
-            # Sort by percentage and format display
-            sorted_holders = sorted(holders, key=lambda x: x[1], reverse=True)
+            accounts = result.get("result", {}).get("value", [])
             holder_lines = []
-            for idx, (addr, pct) in enumerate(sorted_holders[:limit], 1):
-                holder_lines.append(f"{idx}. {addr}: {pct:.2f}%")
-            
-            return "\n".join(holder_lines)
-            
+            for idx, item in enumerate(accounts[:limit], 1):
+                address = item["address"]
+                ui_amount = item.get("uiAmount") or 0
+                percentage = (ui_amount / _PUMP_TOTAL_SUPPLY) * 100
+                short_address = f"{address[:6]}...{address[-4:]}"
+                holder_lines.append(f"{idx}. {short_address}: {percentage:.2f}%")
+
+            return "\n".join(holder_lines) if holder_lines else "Holder data unavailable"
+
         except Exception as e:
             if logger:
-                logger.error(f"Attempt {attempt + 1} failed: {str(e)}")
+                import traceback
+                logger.error(f"get_top_holders attempt {attempt + 1} failed: {type(e).__name__}: {str(e)}")
+                logger.error(traceback.format_exc())
             if attempt < max_retries - 1:
-                wait_time = 2 ** attempt
-                #logger.info(f"Retrying in {wait_time} seconds...")
-                await asyncio.sleep(wait_time)
+                await asyncio.sleep(2 ** attempt)
                 continue
             return "Holder data unavailable"
 
@@ -822,10 +819,9 @@ async def analyze_for_bundling(client, transactions, token_address):
                 "bundle_score": 0,
                 "transaction_clusters": [],
                 "wallet_analysis": {
-                    "new_wallets": 0,
-                    "total_wallets": 0,
+                    "unique_wallets": 0,
                     "similar_buys": 0,
-                    "supply_percentage": 0
+                    "early_tx_bundled_percentage": 0
                 }
             }
 
@@ -964,19 +960,16 @@ async def analyze_for_bundling(client, transactions, token_address):
         # Sort clusters by size (largest first)
         formatted_clusters.sort(key=lambda x: x["count"], reverse=True)
 
-        # Calculate supply percentage (simplified)
-        # In a real implementation, you would need to calculate the actual token supply controlled
-        # For now, we'll use a simplified approach based on transaction count
-        supply_percentage = min(100, (clustered_tx_count / len(early_transactions)) * 100) if early_transactions else 0
+        # Percentage of early transactions that fell into a cluster (>=3 txs close in time/slot)
+        early_tx_bundled_percentage = min(100, (clustered_tx_count / len(early_transactions)) * 100) if early_transactions else 0
 
         return {
             "bundle_score": round(bundle_score),
             "transaction_clusters": formatted_clusters,
             "wallet_analysis": {
-                "new_wallets": len(wallets),
-                "total_wallets": len(wallets),
+                "unique_wallets": len(wallets),
                 "similar_buys": similar_buys,
-                "supply_percentage": supply_percentage
+                "early_tx_bundled_percentage": early_tx_bundled_percentage
             }
         }
     except Exception as e:
@@ -986,10 +979,9 @@ async def analyze_for_bundling(client, transactions, token_address):
             "bundle_score": 0,
             "transaction_clusters": [],
             "wallet_analysis": {
-                "new_wallets": 0,
-                "total_wallets": 0,
+                "unique_wallets": 0,
                 "similar_buys": 0,
-                "supply_percentage": 0
+                "early_tx_bundled_percentage": 0
             }
         }
 
