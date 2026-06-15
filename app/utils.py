@@ -1,7 +1,6 @@
 import asyncio
 import sys
 from solana.rpc.async_api import AsyncClient
-from solana.rpc.types import MemcmpOpts
 from solders.pubkey import Pubkey
 import requests
 import json
@@ -20,7 +19,7 @@ from typing import Optional
 
 # Import from your config
 sys.path.append('/home/shaolin_saga/config')
-from config import RPC_ENDPOINT, PUMP_PROGRAM, LAMPORTS_PER_SOL
+from config import RPC_ENDPOINT, PUMP_PROGRAM, LAMPORTS_PER_SOL, TOP_HOLDERS_RPC
 
 # Custom JSON Encoder to handle special objects
 class CustomJSONEncoder(json.JSONEncoder):
@@ -62,62 +61,43 @@ def get_contract_uri_for_mint(mint: str) -> Optional[str]:
         return f"https://solscan.io/token/{mint}"
 
 
-_TOKEN_PROGRAM_ID = Pubkey.from_string("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")
+_PUMP_TOTAL_SUPPLY = 1_000_000_000  # 1B tokens (UI amount, not raw)
 
 async def get_top_holders(client: AsyncClient, mint: Pubkey, limit: int = 10, max_retries: int = 3, logger=None):
-    """Get top token holders for a given mint using getProgramAccounts"""
-    TOTAL_SUPPLY = 1000000000  # 1 billion tokens
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "getTokenLargestAccounts",
+        "params": [str(mint)]
+    }
 
     for attempt in range(max_retries):
         try:
-            if logger:
-                logger.info(f"Calling getProgramAccounts for mint: {mint}")
+            async with aiohttp.ClientSession() as session:
+                async with session.post(TOP_HOLDERS_RPC, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    result = await resp.json()
 
-            response = await client.get_program_accounts(
-                _TOKEN_PROGRAM_ID,
-                encoding="jsonParsed",
-                filters=[
-                    165,                                      # dataSize: token accounts are always 165 bytes
-                    MemcmpOpts(offset=0, bytes=str(mint))     # mint address sits at offset 0
-                ]
-            )
+            if "error" in result:
+                raise ValueError(f"RPC error: {result['error']}")
 
-            if not hasattr(response, 'value') or response.value is None:
-                raise ValueError("Invalid response from RPC")
-
-            if logger:
-                logger.info(f"Number of accounts found: {len(response.value)}")
-
-            holders = []
-            for keyed_account in response.value:
-                try:
-                    parsed = keyed_account.account.data.parsed
-                    ui_amount = parsed['info']['tokenAmount']['uiAmount'] or 0.0
-                    address = str(keyed_account.pubkey)
-                    percentage = (ui_amount / TOTAL_SUPPLY) * 100
-                    short_address = f"{address[:6]}...{address[-4:]}"
-                    holders.append((short_address, percentage))
-                except (KeyError, AttributeError, TypeError) as parse_err:
-                    if logger:
-                        logger.warning(f"Could not parse account {keyed_account.pubkey}: {parse_err}")
-                    continue
-
-            sorted_holders = sorted(holders, key=lambda x: x[1], reverse=True)
+            accounts = result.get("result", {}).get("value", [])
             holder_lines = []
-            for idx, (addr, pct) in enumerate(sorted_holders[:limit], 1):
-                holder_lines.append(f"{idx}. {addr}: {pct:.2f}%")
+            for idx, item in enumerate(accounts[:limit], 1):
+                address = item["address"]
+                ui_amount = item.get("uiAmount") or 0
+                percentage = (ui_amount / _PUMP_TOTAL_SUPPLY) * 100
+                short_address = f"{address[:6]}...{address[-4:]}"
+                holder_lines.append(f"{idx}. {short_address}: {percentage:.2f}%")
 
-            return "\n".join(holder_lines)
+            return "\n".join(holder_lines) if holder_lines else "Holder data unavailable"
 
         except Exception as e:
             if logger:
                 import traceback
-                logger.error(f"Attempt {attempt + 1} failed: {type(e).__name__}: {str(e)}")
+                logger.error(f"get_top_holders attempt {attempt + 1} failed: {type(e).__name__}: {str(e)}")
                 logger.error(traceback.format_exc())
             if attempt < max_retries - 1:
-                wait_time = 2 ** attempt
-                #logger.info(f"Retrying in {wait_time} seconds...")
-                await asyncio.sleep(wait_time)
+                await asyncio.sleep(2 ** attempt)
                 continue
             return "Holder data unavailable"
 
@@ -839,10 +819,9 @@ async def analyze_for_bundling(client, transactions, token_address):
                 "bundle_score": 0,
                 "transaction_clusters": [],
                 "wallet_analysis": {
-                    "new_wallets": 0,
-                    "total_wallets": 0,
+                    "unique_wallets": 0,
                     "similar_buys": 0,
-                    "supply_percentage": 0
+                    "early_tx_bundled_percentage": 0
                 }
             }
 
@@ -981,19 +960,16 @@ async def analyze_for_bundling(client, transactions, token_address):
         # Sort clusters by size (largest first)
         formatted_clusters.sort(key=lambda x: x["count"], reverse=True)
 
-        # Calculate supply percentage (simplified)
-        # In a real implementation, you would need to calculate the actual token supply controlled
-        # For now, we'll use a simplified approach based on transaction count
-        supply_percentage = min(100, (clustered_tx_count / len(early_transactions)) * 100) if early_transactions else 0
+        # Percentage of early transactions that fell into a cluster (>=3 txs close in time/slot)
+        early_tx_bundled_percentage = min(100, (clustered_tx_count / len(early_transactions)) * 100) if early_transactions else 0
 
         return {
             "bundle_score": round(bundle_score),
             "transaction_clusters": formatted_clusters,
             "wallet_analysis": {
-                "new_wallets": len(wallets),
-                "total_wallets": len(wallets),
+                "unique_wallets": len(wallets),
                 "similar_buys": similar_buys,
-                "supply_percentage": supply_percentage
+                "early_tx_bundled_percentage": early_tx_bundled_percentage
             }
         }
     except Exception as e:
@@ -1003,10 +979,9 @@ async def analyze_for_bundling(client, transactions, token_address):
             "bundle_score": 0,
             "transaction_clusters": [],
             "wallet_analysis": {
-                "new_wallets": 0,
-                "total_wallets": 0,
+                "unique_wallets": 0,
                 "similar_buys": 0,
-                "supply_percentage": 0
+                "early_tx_bundled_percentage": 0
             }
         }
 

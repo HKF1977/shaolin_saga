@@ -34,6 +34,8 @@ WSS_ENDPOINT_SECONDARY = "wss://solana-mainnet.core.chainstack.com/dac4a0f01e1e2
 RPC_BONDING_ENDPOINT = "https://solana-mainnet.core.chainstack.com/4014cf4d3ede9233e6b6d4a1ea49cb74"
 WSS_BONDING_ENDPOINT = "wss://solana-mainnet.core.chainstack.com/4014cf4d3ede9233e6b6d4a1ea49cb74"
 
+TOP_HOLDERS_RPC = "https://lb.drpc.live/solana/AlVCNjZMdkjnqEyazIkQl8RZ8omSY-gR8ZXPVjewFaCJ"
+
 RPC_MOMENTUM_ENDPOINT = "https://solana-mainnet.core.chainstack.com/f26e353d42e11efa74782470e1fd0eb0" 
 WSS_MOMENTUM_ENDPOINT = "wss://solana-mainnet.core.chainstack.com/f26e353d42e11efa74782470e1fd0eb0"
 

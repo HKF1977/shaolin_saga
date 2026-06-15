@@ -2491,7 +2491,7 @@ async def on_ready():
     #Get message queue 
     message_queue = get_message_queue()
     await ensure_queue_processing()
-    await ensure_telegram_queue_processing()
+    #await ensure_telegram_queue_processing()
 
     asyncio.create_task(monitor_memory_usage(websocket_logger))
 
@@ -2506,7 +2506,7 @@ async def on_ready():
     #threading.Thread(target=momentum_monitor, daemon=True).start()
     threading.Thread(target=pump_livestream_monitor, daemon=True).start()
     bot.loop.create_task(bonk_main.start_monitoring(bot, servers))
-    bot.loop.create_task(bonk_bonding_monitor.start_monitoring(bot, servers))
+    #bot.loop.create_task(bonk_bonding_monitor.start_monitoring(bot, servers))
     bot.loop.create_task(polymarket_main.start_monitoring(bot, servers))
 
     # Sync slash commands
