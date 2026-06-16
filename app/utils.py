@@ -63,7 +63,7 @@ def get_contract_uri_for_mint(mint: str) -> Optional[str]:
 
 _PUMP_TOTAL_SUPPLY = 1_000_000_000  # 1B tokens (UI amount, not raw)
 
-async def get_top_holders(client: AsyncClient, mint: Pubkey, limit: int = 10, max_retries: int = 3, logger=None):
+async def get_top_holders(client: AsyncClient, mint: Pubkey, limit: int = 10, max_retries: int = 3, logger=None, bonding_curve_account: str = None):
     payload = {
         "jsonrpc": "2.0",
         "id": 1,
@@ -86,8 +86,8 @@ async def get_top_holders(client: AsyncClient, mint: Pubkey, limit: int = 10, ma
                 address = item["address"]
                 ui_amount = item.get("uiAmount") or 0
                 percentage = (ui_amount / _PUMP_TOTAL_SUPPLY) * 100
-                short_address = f"{address[:6]}...{address[-4:]}"
-                holder_lines.append(f"{idx}. {short_address}: {percentage:.2f}%")
+                label = "Bonding Curve" if bonding_curve_account and address == bonding_curve_account else f"{address[:6]}...{address[-4:]}"
+                holder_lines.append(f"{idx}. {label}: {percentage:.2f}%")
 
             return "\n".join(holder_lines) if holder_lines else "Holder data unavailable"
 
@@ -818,6 +818,7 @@ async def analyze_for_bundling(client, transactions, token_address):
             return {
                 "bundle_score": 0,
                 "transaction_clusters": [],
+                "early_tx_count": 0,
                 "wallet_analysis": {
                     "unique_wallets": 0,
                     "similar_buys": 0,
@@ -828,8 +829,8 @@ async def analyze_for_bundling(client, transactions, token_address):
         # Sort transactions by blockTime
         transactions.sort(key=lambda x: x.get("blockTime", 0))
 
-        # Focus on the first 50 transactions or all if less than 50
-        early_transactions = transactions[:min(50, len(transactions))]
+        # Focus on the first 100 transactions or all if less than 100
+        early_transactions = transactions[:min(100, len(transactions))]
 
         # 1. Find transaction clusters (transactions in the same or consecutive slots)
         clusters = []
@@ -957,8 +958,8 @@ async def analyze_for_bundling(client, transactions, token_address):
                     "signatures": [tx.get("signature") for tx in cluster]
                 })
 
-        # Sort clusters by size (largest first)
-        formatted_clusters.sort(key=lambda x: x["count"], reverse=True)
+        # Sort clusters chronologically by slot
+        formatted_clusters.sort(key=lambda x: x["slot"] or 0)
 
         # Percentage of early transactions that fell into a cluster (>=3 txs close in time/slot)
         early_tx_bundled_percentage = min(100, (clustered_tx_count / len(early_transactions)) * 100) if early_transactions else 0
@@ -966,6 +967,7 @@ async def analyze_for_bundling(client, transactions, token_address):
         return {
             "bundle_score": round(bundle_score),
             "transaction_clusters": formatted_clusters,
+            "early_tx_count": len(early_transactions),
             "wallet_analysis": {
                 "unique_wallets": len(wallets),
                 "similar_buys": similar_buys,
@@ -978,6 +980,7 @@ async def analyze_for_bundling(client, transactions, token_address):
         return {
             "bundle_score": 0,
             "transaction_clusters": [],
+            "early_tx_count": 0,
             "wallet_analysis": {
                 "unique_wallets": 0,
                 "similar_buys": 0,
