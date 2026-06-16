@@ -18,6 +18,9 @@ from solders.pubkey import Pubkey
 from solana.rpc.types import TokenAccountOpts
 from base64 import b64decode
 import struct
+import logging
+
+logger = logging.getLogger('commands')
 
 # Import from utils file
 from utils import get_token_metadata_by_mint, get_moralis_usd_price_cached, shorten_number, get_moralis_token_prices, is_valid_solana_address, get_top_holders, get_token_metadata, get_token_price, get_token_symbol, get_image_data, get_metadata, get_token_transactions, analyze_for_bundling
@@ -42,12 +45,10 @@ def is_commands_channel(interaction: discord.Interaction) -> bool:
         if server['server_id'] == server_id:
             if 'commands_channel' in server:
                 commands_channel = server['commands_channel']
-                print(f"[DEBUG] guild={server_id} interaction.channel_id={interaction.channel_id} commands_channel={commands_channel} match={interaction.channel_id == commands_channel}")
                 return interaction.channel_id == commands_channel
             else:
                 return True
 
-    print(f"[DEBUG] guild={server_id} not found in allowed_servers")
     return False
 
 def get_commands_channel_mention(guild_id: int) -> str:
@@ -442,15 +443,19 @@ def register_commands(bot, logger):
                 token_pubkey = Pubkey.from_string(token_address)
                 token_info = await get_token_metadata(client, token_pubkey, logger)
                 
+                # Look up associatedBondingCurve for pump tokens
+                bonding_curve_account = None
+                active_token_path = f"/home/shaolin_saga/data/pump_data/active_tokens/{token_address}.json"
+                if os.path.exists(active_token_path):
+                    try:
+                        with open(active_token_path, 'r') as f:
+                            active_data = json.load(f)
+                        bonding_curve_account = active_data.get('associatedBondingCurve')
+                    except Exception:
+                        pass
+
                 # Get top holders
-                holders = await get_top_holders(client, token_pubkey, limit=10, logger=logger)
-                
-                if not holders:
-                    await interaction.followup.send(
-                        f"No holder data found for token: {token_address}. This might be a new token or it has no holders yet."
-                    )
-                    logger.info(f"No holders found for token: {token_address}")
-                    return
+                holders = await get_top_holders(client, token_pubkey, limit=10, logger=logger, bonding_curve_account=bonding_curve_account)
                 
                 # Create embed
                 embed = discord.Embed(
@@ -459,16 +464,13 @@ def register_commands(bot, logger):
                     color=0xFFD700,
                     timestamp=datetime.utcnow()
                 )
-                
+
                 embed.set_author(name="Shaolin Saga", icon_url=SS_ICON_URL, url="")
 
-                # Set thumbnail if we have an image
                 if token_info.get('image_url'):
                     embed.set_thumbnail(url=token_info['image_url'])
-               
 
-                if holders:
-                    embed.add_field(name="Top Holders", value=f'```{holders}```', inline=False)
+                embed.add_field(name="Top Holders", value=f'```{holders}```', inline=False)
                 
 
                 # Hotkeys section
@@ -783,7 +785,7 @@ def register_commands(bot, logger):
             embed.add_field(name="Quick Buys", value=hotkeys, inline=False)
             # Add footer
             embed.set_footer(text="Powered by Shaolin Saga!", icon_url=SS_ICON_URL)
-            
+
             # Send the embed with the attached image
             await interaction.followup.send(embed=embed, file=image_file)
             logger.info("Successfully sent crypto heatmap")
@@ -1161,37 +1163,28 @@ def register_commands(bot, logger):
         await interaction.response.defer(thinking=True)
         
         try:
-            # Initial embed to show we're working on it
+            # Get token metadata if available
+            token_name = "Unknown Token"
+            token_symbol = "UNKNOWN"
+
+            metadata = await get_token_metadata_by_mint(token_address, logger)
+            if metadata:
+                token_name = metadata.get('token_name', 'Unknown Token')
+                token_symbol = metadata.get('token_symbol', 'UNKNOWN')
+
+            title = (
+                f"🔍 Bundle Analysis At Launch: {token_name} ({token_symbol})"
+                if token_name != "Unknown Token"
+                else "🔍 Bundle Analysis At Launch"
+            )
+
             embed = discord.Embed(
-                title="🔍 Bundle Analysis",
+                title=title,
                 description=f"Analyzing token [`{token_address[:8]}...{token_address[-4:]}`](https://solscan.io/token/{token_address}) for potential bundling activity...",
                 color=discord.Color.blue(),
                 timestamp=datetime.utcnow()
             )
-
             embed.set_author(name="Shaolin Saga", icon_url=SS_ICON_URL, url="")
-            
-            # Get token metadata if available
-            token_name = "Unknown Token"
-            token_symbol = "UNKNOWN"
-            
-            # Check if this is a pump.fun token we know about
-            pump_token_path = f"/home/shaolin_saga/data/pump_data/metadata/{token_address}.json"
-            if os.path.exists(pump_token_path):
-                with open(pump_token_path, 'r') as f:
-                    tx_data = json.load(f)
-                
-                token_name = tx_data.get('name', 'Unknown Token')
-                token_symbol = tx_data.get('symbol', 'UNKNOWN')
-                
-                # Update embed with token info
-                embed.title = f"🔍 Bundle Analysis: {token_name} ({token_symbol})"
-            
-            # Fetch transaction history for the token
-            # We'll need to get:
-            # 1. Creation transaction
-            # 2. Early transactions (first ~50)
-            # 3. Group them by timestamp/slot
             
             async with AsyncClient(RPC_ENDPOINT) as client:
                 # Get token's transaction signatures
@@ -1222,18 +1215,19 @@ def register_commands(bot, logger):
                     inline=False
                 )
                 
-                # Add transaction clustering info
+                # Add buy wave info
                 clusters = bundle_analysis['transaction_clusters']
+                early_tx_count = bundle_analysis['early_tx_count']
                 if clusters:
                     cluster_text = ""
-                    for i, cluster in enumerate(clusters[:3]):  # Show top 3 clusters
-                        cluster_text += f"**Cluster {i+1}:** {cluster['count']} transactions in {cluster['timespan']:.2f}s\n"
-                    
+                    for i, cluster in enumerate(clusters[:3]):
+                        cluster_text += f"**Wave {i+1}:** {cluster['count']} of {early_tx_count} buys in second {i+1}\n"
+
                     if len(clusters) > 3:
-                        cluster_text += f"*+ {len(clusters) - 3} more clusters...*\n"
-                    
+                        cluster_text += f"*+ {len(clusters) - 3} more waves...*\n"
+
                     embed.add_field(
-                        name="Transaction Clusters",
+                        name="Early Transactions",
                         value=cluster_text,
                         inline=False
                     )
@@ -1242,9 +1236,9 @@ def register_commands(bot, logger):
                 wallet_analysis = bundle_analysis['wallet_analysis']
                 embed.add_field(
                     name="Wallet Analysis",
-                    value=f"**New Wallets:** {wallet_analysis['new_wallets']}/{wallet_analysis['total_wallets']}\n"
+                    value=f"**Unique Wallets:** {wallet_analysis['unique_wallets']}\n"
                         f"**Similar Buy Amounts:** {wallet_analysis['similar_buys']}\n"
-                        f"**Supply Controlled:** {wallet_analysis['supply_percentage']:.1f}%",
+                        f"**Early TX Bundled %:** {wallet_analysis['early_tx_bundled_percentage']:.1f}%",
                     inline=False
                 )
                 

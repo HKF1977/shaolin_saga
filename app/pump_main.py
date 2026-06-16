@@ -2069,7 +2069,12 @@ def calculate_time_to_bonding(created_timestamp: float) -> str:
 # Create the Discord embed
 async def create_bonding_embed(bonding_curve, mint, stage):
     async with AsyncClient(RPC_ENDPOINT) as client:
-        top_holders = await get_top_holders(client, Pubkey.from_string(mint), logger=websocket_logger)
+        bonding_curve_account = None
+        active_data = safe_json_read(f"/home/shaolin_saga/data/pump_data/active_tokens/{mint}.json", logger=websocket_logger)
+        if active_data:
+            bonding_curve_account = active_data.get('associatedBondingCurve')
+
+        top_holders = await get_top_holders(client, Pubkey.from_string(mint), logger=websocket_logger, bonding_curve_account=bonding_curve_account)
 
         contract_uri = 'https://pump.fun/' + mint
         
