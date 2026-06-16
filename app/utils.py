@@ -157,17 +157,28 @@ async def get_saved_transaction_metadata(mint, logger=None):
         return None
 
 
-async def get_saved_bonk_metadata(mint):
+async def get_saved_bonk_metadata(mint, logger=None):
     """Get token metadata from new file structure"""
     try:
-        # Check metadata directory
         metadata_file = f"/home/shaolin_saga/data/bonk_data/bonk_metadata/{mint}.json"
-        if os.path.exists(metadata_file):
-            with open(metadata_file, 'r') as f:
-                return json.load(f)
+        if logger:
+            logger.debug(f"[bonk_metadata] Looking for {metadata_file}")
+
+        if not os.path.exists(metadata_file):
+            if logger:
+                logger.debug(f"[bonk_metadata] File not found: {metadata_file}")
+            return None
+
+        with open(metadata_file, 'r') as f:
+            data = json.load(f)
+
+        if logger:
+            logger.debug(f"[bonk_metadata] Loaded metadata for {mint}: {list(data.keys())}")
+        return data
 
     except Exception as e:
-        websocket_logger.error(f"Error loading metadata for {mint}: {str(e)}")
+        if logger:
+            logger.error(f"[bonk_metadata] Error loading metadata for {mint}: {str(e)}")
         return None
 
 async def get_token_metadata(client: AsyncClient, mint: Pubkey, logger=None):
@@ -215,35 +226,40 @@ async def get_token_metadata_by_mint(mint, logger=None):
     """
     if "pump" in mint:
         tx_data = await get_saved_transaction_metadata(mint, logger)
-        
+
         if tx_data:
             return {
                 'token_name': tx_data.get('name', 'Unknown'),
                 'user': tx_data.get('user', 'Unknown'),
                 'token_symbol': tx_data.get('symbol', 'Unknown'),
+                'image_url': tx_data.get('image_url'),
                 'twitter_url': tx_data.get('twitter_url'),
                 'telegram_url': tx_data.get('telegram_url'),
                 'website_url': tx_data.get('website_url')
             }
         else:
-            logger.info(f"No pump metadata found for mint: {mint}")
-            
+            if logger:
+                logger.info(f"No pump metadata found for mint: {mint}")
+
     elif "bonk" in mint:
-        tx_data = await get_saved_bonk_metadata(mint)
-        
+        tx_data = await get_saved_bonk_metadata(mint, logger)
+
         if tx_data:
             return {
                 'token_name': tx_data.get('name', 'Unknown'),
                 'user': tx_data.get('user', 'Unknown'),
                 'token_symbol': tx_data.get('symbol', 'Unknown'),
+                'image_url': tx_data.get('image_url'),
                 'twitter_url': tx_data.get('twitter_url'),
                 'telegram_url': tx_data.get('telegram_url'),
                 'website_url': tx_data.get('website_url')
             }
         else:
-            logger.info(f"No bonk metadata found for mint: {mint}")
+            if logger:
+                logger.info(f"No bonk metadata found for mint: {mint}")
     else:
-        logger.info(f"No transaction data found: {mint}")
+        if logger:
+            logger.info(f"No transaction data found: {mint}")
     
     return None
 
