@@ -410,7 +410,7 @@ def register_commands(bot, logger):
 
     @bot.tree.command(
         name="top-holders", 
-        description="Show the top token holders for a pump.fun token"
+        description="Show the top token holders for a token"
     )
     @app_commands.describe(
         token_address="The Solana address of the token mint"
@@ -441,8 +441,10 @@ def register_commands(bot, logger):
                 
                 # Get token metadata
                 token_pubkey = Pubkey.from_string(token_address)
-                token_info = await get_token_metadata(client, token_pubkey, logger)
-                
+                token_info = await get_token_metadata_by_mint(token_address, logger) or {}
+                token_name = token_info.get('token_name', 'Unknown Token')
+                token_symbol = token_info.get('token_symbol', '???')
+
                 # Look up associatedBondingCurve for pump tokens
                 bonding_curve_account = None
                 active_token_path = f"/home/shaolin_saga/data/pump_data/active_tokens/{token_address}.json"
@@ -456,10 +458,10 @@ def register_commands(bot, logger):
 
                 # Get top holders
                 holders = await get_top_holders(client, token_pubkey, limit=10, logger=logger, bonding_curve_account=bonding_curve_account)
-                
+
                 # Create embed
                 embed = discord.Embed(
-                    title=f"Top Holders for {token_info['name']} ({token_info['symbol']})",
+                    title=f"Top Holders for: {token_name} ({token_symbol})",
                     description=f"Token: [{token_address}](https://solscan.io/token/{token_address})",
                     color=0xFFD700,
                     timestamp=datetime.utcnow()
@@ -1138,7 +1140,7 @@ def register_commands(bot, logger):
 
     @bot.tree.command(
         name="bundle-check", 
-        description="Check a token for potential bundling activity"
+        description="Check a token for bundling activity when it was launched"
     )
     @app_commands.describe(
         token_address="The Solana address of the token to check"
