@@ -410,7 +410,7 @@ def register_commands(bot, logger):
 
     @bot.tree.command(
         name="top-holders", 
-        description="Show the top token holders for a token"
+        description="Shows the top token holders for a token in realtime"
     )
     @app_commands.describe(
         token_address="The Solana address of the token mint"
@@ -473,7 +473,8 @@ def register_commands(bot, logger):
                     embed.set_thumbnail(url=token_info['image_url'])
 
                 embed.add_field(name="Top Holders", value=f'```{holders}```', inline=False)
-                
+
+                embed.add_field(name="", value=f'```Top Holders returns the top 10 largest token holders in realtime```', inline=False)
 
                 # Hotkeys section
                 hotkeys = (    
@@ -1239,8 +1240,7 @@ def register_commands(bot, logger):
                 embed.add_field(
                     name="Wallet Analysis",
                     value=f"**Unique Wallets:** {wallet_analysis['unique_wallets']}\n"
-                        f"**Similar Buy Amounts:** {wallet_analysis['similar_buys']}\n"
-                        f"**Early TX Bundled %:** {wallet_analysis['early_tx_bundled_percentage']:.1f}%",
+                        f"**Similar Buy Amounts:** {wallet_analysis['similar_buys']}",
                     inline=False
                 )
                 
@@ -1260,6 +1260,8 @@ def register_commands(bot, logger):
                     value=conclusion,
                     inline=False
                 )
+
+                embed.add_field(name="", value=f'```Bundle Check analyses initial transactions for coordinated wallet activity at launch. For current holder distribution use /top-holders```', inline=False)
                 
                
                 # Hotkeys section
