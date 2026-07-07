@@ -63,7 +63,12 @@ def get_contract_uri_for_mint(mint: str) -> Optional[str]:
 
 _PUMP_TOTAL_SUPPLY = 1_000_000_000  # 1B tokens (UI amount, not raw)
 
-async def get_top_holders(client: AsyncClient, mint: Pubkey, limit: int = 10, max_retries: int = 3, logger=None, bonding_curve_account: str = None):
+async def fetch_top_holders_raw(mint: Pubkey, limit: int = 10, max_retries: int = 3, logger=None, bonding_curve_account: str = None):
+    """
+    Fetch top holder accounts for a mint and return structured data:
+    [{"rank": int, "address": str, "ui_amount": float, "percentage": float, "is_bonding_curve": bool}, ...]
+    Returns [] on failure.
+    """
     payload = {
         "jsonrpc": "2.0",
         "id": 1,
@@ -81,25 +86,44 @@ async def get_top_holders(client: AsyncClient, mint: Pubkey, limit: int = 10, ma
                 raise ValueError(f"RPC error: {result['error']}")
 
             accounts = result.get("result", {}).get("value", [])
-            holder_lines = []
+            holders = []
             for idx, item in enumerate(accounts[:limit], 1):
                 address = item["address"]
                 ui_amount = item.get("uiAmount") or 0
                 percentage = (ui_amount / _PUMP_TOTAL_SUPPLY) * 100
-                label = "Bonding Curve" if bonding_curve_account and address == bonding_curve_account else f"{address[:6]}...{address[-4:]}"
-                holder_lines.append(f"{idx}. {label}: {percentage:.2f}%")
+                holders.append({
+                    "rank": idx,
+                    "address": address,
+                    "ui_amount": ui_amount,
+                    "percentage": round(percentage, 2),
+                    "is_bonding_curve": bool(bonding_curve_account and address == bonding_curve_account),
+                })
 
-            return "\n".join(holder_lines) if holder_lines else "Holder data unavailable"
+            return holders
 
         except Exception as e:
             if logger:
                 import traceback
-                logger.error(f"get_top_holders attempt {attempt + 1} failed: {type(e).__name__}: {str(e)}")
+                logger.error(f"fetch_top_holders_raw attempt {attempt + 1} failed: {type(e).__name__}: {str(e)}")
                 logger.error(traceback.format_exc())
             if attempt < max_retries - 1:
                 await asyncio.sleep(2 ** attempt)
                 continue
-            return "Holder data unavailable"
+            return []
+
+
+async def get_top_holders(client: AsyncClient, mint: Pubkey, limit: int = 10, max_retries: int = 3, logger=None, bonding_curve_account: str = None):
+    """Formatted text version of fetch_top_holders_raw(), kept for existing callers (pump_main.py, bonk_bonding_monitor.py)."""
+    holders = await fetch_top_holders_raw(mint, limit=limit, max_retries=max_retries, logger=logger, bonding_curve_account=bonding_curve_account)
+    if not holders:
+        return "Holder data unavailable"
+
+    holder_lines = []
+    for h in holders:
+        label = "Bonding Curve" if h["is_bonding_curve"] else f"{h['address'][:6]}...{h['address'][-4:]}"
+        holder_lines.append(f"{h['rank']}. {label}: {h['percentage']:.2f}%")
+
+    return "\n".join(holder_lines)
 
 
 #Set tick or cross for socials

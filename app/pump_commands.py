@@ -23,7 +23,8 @@ import logging
 logger = logging.getLogger('commands')
 
 # Import from utils file
-from utils import get_token_metadata_by_mint, get_moralis_usd_price_cached, shorten_number, get_moralis_token_prices, is_valid_solana_address, get_top_holders, get_token_metadata, get_token_price, get_token_symbol, get_image_data, get_metadata, get_token_transactions, analyze_for_bundling
+from utils import get_token_metadata_by_mint, get_moralis_usd_price_cached, shorten_number, get_moralis_token_prices, is_valid_solana_address, get_token_metadata, get_token_price, get_token_symbol, get_image_data, get_metadata, get_token_transactions, analyze_for_bundling
+from token_reports import get_top_holders_report
 
 # Import from pnl calculator
 #from pnl_calculator import get_pair_address, get_price_at_blocktime, calculate_pnl, blocktime_to_iso
@@ -433,63 +434,54 @@ def register_commands(bot, logger):
         
         # Defer the response since fetching data might take time
         await interaction.response.defer(thinking=True)
-        
+
         try:
-            # Fetch top holders data
-            async with AsyncClient(RPC_ENDPOINT) as client:
-                logger.info(f"Fetching top holders for token: {token_address}")
-                
-                # Get token metadata
-                token_pubkey = Pubkey.from_string(token_address)
-                token_info = await get_token_metadata_by_mint(token_address, logger) or {}
-                token_name = token_info.get('token_name', 'Unknown Token')
-                token_symbol = token_info.get('token_symbol', '???')
+            logger.info(f"Fetching top holders for token: {token_address}")
 
-                # Look up associatedBondingCurve for pump tokens
-                bonding_curve_account = None
-                active_token_path = f"/home/shaolin_saga/data/pump_data/active_tokens/{token_address}.json"
-                if os.path.exists(active_token_path):
-                    try:
-                        with open(active_token_path, 'r') as f:
-                            active_data = json.load(f)
-                        bonding_curve_account = active_data.get('associatedBondingCurve')
-                    except Exception:
-                        pass
+            # Fetch top holders report (shared with the API endpoint)
+            report = await get_top_holders_report(token_address, logger, limit=10)
 
-                # Get top holders
-                holders = await get_top_holders(client, token_pubkey, limit=10, logger=logger, bonding_curve_account=bonding_curve_account)
+            token_name = report['token_name']
+            token_symbol = report['token_symbol']
 
-                # Create embed
-                embed = discord.Embed(
-                    title=f"Top Holders for: {token_name} ({token_symbol})",
-                    description=f"Token: [{token_address}](https://solscan.io/token/{token_address})",
-                    color=0xFFD700,
-                    timestamp=datetime.utcnow()
-                )
+            # Format holders back into the same text block the embed has always shown
+            holder_lines = []
+            for h in report['holders']:
+                label = "Bonding Curve" if h['is_bonding_curve'] else f"{h['address'][:6]}...{h['address'][-4:]}"
+                holder_lines.append(f"{h['rank']}. {label}: {h['percentage']:.2f}%")
+            holders_text = "\n".join(holder_lines) if holder_lines else "Holder data unavailable"
 
-                embed.set_author(name="Shaolin Saga", icon_url=SS_ICON_URL, url="")
+            # Create embed
+            embed = discord.Embed(
+                title=f"Top Holders for: {token_name} ({token_symbol})",
+                description=f"Token: [{token_address}](https://solscan.io/token/{token_address})",
+                color=0xFFD700,
+                timestamp=datetime.utcnow()
+            )
 
-                if token_info.get('image_url'):
-                    embed.set_thumbnail(url=token_info['image_url'])
+            embed.set_author(name="Shaolin Saga", icon_url=SS_ICON_URL, url="")
 
-                embed.add_field(name="Top Holders", value=f'```{holders}```', inline=False)
+            if report.get('image_url'):
+                embed.set_thumbnail(url=report['image_url'])
 
-                embed.add_field(name="", value=f'```Top Holders returns the top 10 largest token holders in realtime```', inline=False)
+            embed.add_field(name="Top Holders", value=f'```{holders_text}```', inline=False)
 
-                # Hotkeys section
-                hotkeys = (    
-                f"[ PHOTON ](https://photon-sol.tinyastro.io/en/r/@codesaga/{token_address}) | [ AXIOM ](https://axiom.trade/t/{token_address}/@codesaga) | [ PADRE ](https://trade.padre.gg/trade/solana/{token_address}?rk=shaolinsaga) | [ BULLX ](https://neo.bullx.io/terminal?chainId=1399811149&address={token_address}) | [ DEXSCEENER ](https://dexscreener.com/solana/{token_address}) | [ PUMP ](https://pump.fun/coin/{token_address})"
-                )
+            embed.add_field(name="", value=f'```Top Holders returns the top 10 largest token holders in realtime```', inline=False)
 
-                embed.add_field(name="Quick Buys", value=hotkeys, inline=False)
+            # Hotkeys section
+            hotkeys = (
+            f"[ PHOTON ](https://photon-sol.tinyastro.io/en/r/@codesaga/{token_address}) | [ AXIOM ](https://axiom.trade/t/{token_address}/@codesaga) | [ PADRE ](https://trade.padre.gg/trade/solana/{token_address}?rk=shaolinsaga) | [ BULLX ](https://neo.bullx.io/terminal?chainId=1399811149&address={token_address}) | [ DEXSCEENER ](https://dexscreener.com/solana/{token_address}) | [ PUMP ](https://pump.fun/coin/{token_address})"
+            )
 
-                # Add footer
-                embed.set_footer(text="Powered by Shaolin Saga!", icon_url=SS_ICON_URL)
-                
-                # Send the embed
-                await interaction.followup.send(embed=embed)
-                logger.info(f"Successfully sent top holders for {token_address}")
-        
+            embed.add_field(name="Quick Buys", value=hotkeys, inline=False)
+
+            # Add footer
+            embed.set_footer(text="Powered by Shaolin Saga!", icon_url=SS_ICON_URL)
+
+            # Send the embed
+            await interaction.followup.send(embed=embed)
+            logger.info(f"Successfully sent top holders for {token_address}")
+
         except Exception as e:
             logger.error(f"Error in top-holders command: {str(e)}")
             logger.error(traceback.format_exc())
