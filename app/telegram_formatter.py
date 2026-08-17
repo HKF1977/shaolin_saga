@@ -127,6 +127,37 @@ def format_new_bonk_tokens(data: dict) -> str:
     )
 
 
+def format_new_nft_collection(data: dict) -> str:
+    """
+    Formatter for new mpl-core NFT collection creation (new_nft_collections signal).
+    Expects keys from collection_data in handle_new_collection().
+    """
+    collection = data.get('collection', '')
+    name = data.get('name', 'Unknown')
+    description = data.get('description', 'No Description Added')
+    creator = data.get('creator', '')
+    twitter_url = data.get('twitter_url', '')
+    telegram_url = data.get('telegram_url', '')
+    website_url = data.get('website_url', '')
+
+    if description and len(description) > 200:
+        description = description[:197] + "..."
+
+    socials = _socials_line(twitter_url, telegram_url, website_url)
+    creator_url = f"https://solscan.io/account/{creator}"
+    collection_url = f"https://solscan.io/account/{collection}"
+
+    return (
+        f"🖼️ <b>New NFT Collection!</b>\n\n"
+        f"<b>{name}</b>\n"
+        f"<code>{collection}</code>\n\n"
+        f"📝 {description}\n\n"
+        f"👤 <a href=\"{creator_url}\">Creator</a>\n"
+        f"🔗 <a href=\"{collection_url}\">Explorer</a>\n"
+        f"🔗 {socials}"
+    )
+
+
 def format_bonding_curve(mint: str, stage: str, metadata: dict) -> str:
     """
     Formatter for pump.fun bonding curve milestones (80% and complete).
