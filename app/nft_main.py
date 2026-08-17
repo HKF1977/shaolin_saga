@@ -284,14 +284,20 @@ async def process_transaction(tx_data_decoded, signature=None):
     try:
         transaction = VersionedTransaction.from_bytes(tx_data_decoded)
 
+        account_keys_str = [str(k) for k in transaction.message.account_keys]
+        mpl_core_mentioned = MPL_CORE_PROGRAM in account_keys_str
+        mpl_core_top_level = False
+
         for ix_idx, ix in enumerate(transaction.message.instructions):
             program_idx = ix.program_id_index
             program_id = str(transaction.message.account_keys[program_idx])
 
             if program_id == MPL_CORE_PROGRAM:
+                mpl_core_top_level = True
                 ix_data = bytes(ix.data)
                 if len(ix_data) >= 1:
                     discriminator = ix_data[0]
+                    nft_logger.info(f"🔍 mpl-core top-level ix seen: discriminator={discriminator} sig={signature}")
 
                     if discriminator in CREATE_COLLECTION_DISCRIMINATORS:
                         nft_logger.info(f"🎯 Collection creation discriminator found: {discriminator}")
@@ -322,6 +328,9 @@ async def process_transaction(tx_data_decoded, signature=None):
                             creator = str(transaction.message.account_keys[0])
 
                             await handle_new_collection(decoded_data, collection_address, creator)
+
+        if mpl_core_mentioned and not mpl_core_top_level:
+            nft_logger.info(f"⚠️ mpl-core mentioned but not a top-level instruction (likely invoked via CPI from another program) sig={signature}")
 
     except Exception as e:
         nft_logger.error(f"Error processing transaction: {str(e)}")
@@ -420,6 +429,7 @@ async def listen_for_new_collections():
                                 if 'value' in block_data and 'block' in block_data['value']:
                                     block = block_data['value']['block']
                                     if 'transactions' in block:
+                                        nft_logger.info(f"📦 Block notification: {len(block['transactions'])} matching transaction(s)")
                                         for tx in block['transactions']:
                                             if isinstance(tx, dict) and 'transaction' in tx:
                                                 tx_data_decoded = base64.b64decode(tx['transaction'][0])
