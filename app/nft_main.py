@@ -1,6 +1,7 @@
 import asyncio
 import json
 import base64
+import base58
 import struct
 import time
 import websockets
@@ -279,58 +280,104 @@ async def handle_new_collection(decoded_data, collection_address, creator):
         nft_logger.error(traceback.format_exc())
 
 
-async def process_transaction(tx_data_decoded, signature=None):
-    """Process transaction and look for mpl-core collection creation"""
+async def process_transaction(tx_data_decoded, meta=None):
+    """Process transaction and look for mpl-core collection creation, both as a
+    top-level instruction and invoked via CPI from another program (e.g. a
+    launchpad/marketplace program). CPI calls only show up in `meta.innerInstructions`,
+    not in the signed transaction itself, so `meta` has to come from the block
+    notification's tx entry alongside the raw transaction bytes.
+    """
     try:
         transaction = VersionedTransaction.from_bytes(tx_data_decoded)
+        tx_signature = str(transaction.signatures[0]) if transaction.signatures else 'unknown'
 
-        account_keys_str = [str(k) for k in transaction.message.account_keys]
-        mpl_core_mentioned = MPL_CORE_PROGRAM in account_keys_str
+        static_keys = [str(k) for k in transaction.message.account_keys]
+
+        # Versioned transactions can reference addresses loaded via address lookup
+        # tables -- those are resolved by the RPC and returned in meta.loadedAddresses.
+        # Any instruction (top-level or inner) can index into them beyond static_keys.
+        loaded_writable, loaded_readonly = [], []
+        if meta:
+            loaded = meta.get('loadedAddresses') or {}
+            loaded_writable = loaded.get('writable') or []
+            loaded_readonly = loaded.get('readonly') or []
+        full_account_keys = static_keys + loaded_writable + loaded_readonly
+
+        mpl_core_mentioned = MPL_CORE_PROGRAM in full_account_keys
         mpl_core_top_level = False
 
-        for ix_idx, ix in enumerate(transaction.message.instructions):
-            program_idx = ix.program_id_index
-            program_id = str(transaction.message.account_keys[program_idx])
+        def resolve_accounts(idx_list):
+            resolved = []
+            for idx in idx_list:
+                if idx < len(full_account_keys):
+                    resolved.append(full_account_keys[idx])
+                else:
+                    nft_logger.warning(f"Account index {idx} out of range (total: {len(full_account_keys)})")
+            return resolved
 
+        async def maybe_handle_create(ix_data, account_idx_list, source):
+            if len(ix_data) < 1:
+                return
+            discriminator = ix_data[0]
+            nft_logger.debug(f"mpl-core {source} ix seen: discriminator={discriminator} sig={tx_signature}")
+
+            if discriminator not in CREATE_COLLECTION_DISCRIMINATORS:
+                return
+
+            nft_logger.info(f"🎯 Collection creation discriminator found ({source}): {discriminator} sig={tx_signature}")
+            decoded_data = decode_create_collection_instruction(ix_data)
+            if not decoded_data:
+                return
+
+            accounts = resolve_accounts(account_idx_list)
+            if not accounts:
+                nft_logger.error(f"No accounts found for {source} collection creation instruction")
+                return
+
+            # accounts[0] is always the collection account -- it's required and
+            # listed first, so it's stable regardless of whether the optional
+            # updateAuthority account was included.
+            collection_address = accounts[0]
+
+            # Fee payer is always account_keys[0] on the transaction, so use it as
+            # the creator rather than trusting a fixed ix.accounts index
+            # (updateAuthority being optional can shift later indices).
+            creator = static_keys[0]
+
+            await handle_new_collection(decoded_data, collection_address, creator)
+
+        # Top-level instructions
+        for ix in transaction.message.instructions:
+            program_id = full_account_keys[ix.program_id_index] if ix.program_id_index < len(full_account_keys) else None
             if program_id == MPL_CORE_PROGRAM:
                 mpl_core_top_level = True
-                ix_data = bytes(ix.data)
-                if len(ix_data) >= 1:
-                    discriminator = ix_data[0]
-                    nft_logger.info(f"🔍 mpl-core top-level ix seen: discriminator={discriminator} sig={signature}")
+                await maybe_handle_create(bytes(ix.data), ix.accounts, "top-level")
 
-                    if discriminator in CREATE_COLLECTION_DISCRIMINATORS:
-                        nft_logger.info(f"🎯 Collection creation discriminator found: {discriminator}")
-                        decoded_data = decode_create_collection_instruction(ix_data)
-                        if decoded_data:
-                            # Get accounts with bounds checking
-                            accounts = []
-                            total_account_keys = len(transaction.message.account_keys)
+        # Inner (CPI) instructions -- only present in meta, not in the raw tx bytes.
+        # Instruction data here comes back base58-encoded regardless of the
+        # block subscription's outer `encoding` setting.
+        if meta and meta.get('innerInstructions'):
+            for entry in meta['innerInstructions']:
+                for inner_ix in entry.get('instructions', []):
+                    program_idx = inner_ix.get('programIdIndex')
+                    if program_idx is None or program_idx >= len(full_account_keys):
+                        continue
+                    if full_account_keys[program_idx] != MPL_CORE_PROGRAM:
+                        continue
 
-                            for idx in ix.accounts:
-                                if idx < total_account_keys:
-                                    accounts.append(str(transaction.message.account_keys[idx]))
-                                else:
-                                    nft_logger.warning(f"Account index {idx} out of range (total: {total_account_keys})")
+                    raw_data = inner_ix.get('data')
+                    if not raw_data:
+                        continue
+                    try:
+                        ix_data = base58.b58decode(raw_data)
+                    except Exception:
+                        nft_logger.debug(f"Could not base58-decode inner instruction data sig={tx_signature}")
+                        continue
 
-                            if not accounts:
-                                nft_logger.error("No accounts found for collection creation instruction")
-                                continue
-
-                            # accounts[0] is always the collection account -- it's required
-                            # and listed first, so it's stable regardless of whether the
-                            # optional updateAuthority account was included.
-                            collection_address = accounts[0]
-
-                            # Fee payer is always account_keys[0] on the transaction, so use
-                            # it as the creator rather than trusting a fixed ix.accounts index
-                            # (updateAuthority being optional can shift later indices).
-                            creator = str(transaction.message.account_keys[0])
-
-                            await handle_new_collection(decoded_data, collection_address, creator)
+                    await maybe_handle_create(ix_data, inner_ix.get('accounts', []), "CPI")
 
         if mpl_core_mentioned and not mpl_core_top_level:
-            nft_logger.info(f"⚠️ mpl-core mentioned but not a top-level instruction (likely invoked via CPI from another program) sig={signature}")
+            nft_logger.debug(f"mpl-core mentioned but not a top-level instruction (CPI) sig={tx_signature}")
 
     except Exception as e:
         nft_logger.error(f"Error processing transaction: {str(e)}")
@@ -429,12 +476,11 @@ async def listen_for_new_collections():
                                 if 'value' in block_data and 'block' in block_data['value']:
                                     block = block_data['value']['block']
                                     if 'transactions' in block:
-                                        nft_logger.info(f"📦 Block notification: {len(block['transactions'])} matching transaction(s)")
+                                        nft_logger.debug(f"📦 Block notification: {len(block['transactions'])} matching transaction(s)")
                                         for tx in block['transactions']:
                                             if isinstance(tx, dict) and 'transaction' in tx:
                                                 tx_data_decoded = base64.b64decode(tx['transaction'][0])
-                                                signature = tx.get('signatures', ['unknown'])[0] if 'signatures' in tx else 'unknown'
-                                                await process_transaction(tx_data_decoded, signature)
+                                                await process_transaction(tx_data_decoded, tx.get('meta'))
 
                         elif 'result' in data:
                             nft_logger.info("✅ NFT collection subscription confirmed")
