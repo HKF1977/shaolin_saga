@@ -984,7 +984,8 @@ async def listen_and_decode_trades():
                 WSS_ENDPOINT_SECONDARY,
                 ping_interval=15,
                 ping_timeout=10,
-                close_timeout=5
+                close_timeout=5,
+                max_size=50 * 1024 * 1024
             ) as websocket:
                 websocket_secondary_logger.info("WebSocket connected successfully")
 
@@ -1073,9 +1074,9 @@ async def listen_and_decode_trades():
                         if 'method' in data and data['method'] == 'blockNotification':
                             if 'params' in data and 'result' in data['params']:
                                 block_data = data['params']['result']
-                                if 'value' in block_data and 'block' in block_data['value']:
-                                    block = block_data['value']['block']
-                                    if 'transactions' in block:
+                                value = block_data.get('value') if block_data else None
+                                block = value.get('block') if value else None
+                                if block and 'transactions' in block:
                                         for tx in block['transactions']:
                                             if isinstance(tx, dict) and 'transaction' in tx:
                                                 tx_data_decoded = base64.b64decode(tx['transaction'][0])

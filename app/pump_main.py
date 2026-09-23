@@ -2312,7 +2312,8 @@ async def listen_and_decode_create():
                 WSS_ENDPOINT,
                 ping_interval=15,
                 ping_timeout=10,
-                close_timeout=5
+                close_timeout=5,
+                max_size=50 * 1024 * 1024
             ) as websocket:
                 websocket_logger.info("WebSocket connected successfully")
 
@@ -2404,9 +2405,14 @@ async def listen_and_decode_create():
                             #websocket_logger.info(f"Message method: {data['method']}")
                             if 'params' in data and 'result' in data['params']:
                                 block_data = data['params']['result']
-                                if 'value' in block_data and 'block' in block_data['value']:
-                                    block = block_data['value']['block']
-                                    if 'transactions' in block:
+                                value = block_data.get('value') if block_data else None
+                                block = value.get('block') if value else None
+                                if not block_data:
+                                    websocket_logger.debug("blockNotification: null result (skipped slot)")
+                                elif not block:
+                                    websocket_logger.debug("blockNotification: no block in payload")
+                                elif 'transactions' in block:
+                                        websocket_logger.debug(f"blockNotification: {len(block['transactions'])} transactions")
                                         for tx in block['transactions']:
                                             if isinstance(tx, dict) and 'transaction' in tx:
                                                 tx_data_decoded = base64.b64decode(tx['transaction'][0])
@@ -2416,8 +2422,9 @@ async def listen_and_decode_create():
                                                     if str(transaction.message.account_keys[ix.program_id_index]) == str(PUMP_PROGRAM):
                                                         ix_data = bytes(ix.data)
                                                         discriminator = struct.unpack('<Q', ix_data[:8])[0]
-                                                        #websocket_logger.info(f"Pump discriminator: {discriminator}")
+                                                        websocket_logger.debug(f"Pump instruction discriminator: {discriminator}")
                                                         if discriminator in create_discriminators:
+                                                            websocket_logger.debug(f"Create discriminator matched: {discriminator}")
                                                             create_ix = next(instr for instr in idl['instructions'] if instr['name'] == 'create')
                                                             try:
                                                                 n_keys = len(transaction.message.account_keys)
@@ -2429,7 +2436,7 @@ async def listen_and_decode_create():
                                                                 if not decoded_args.get('user') or decoded_args['user'] == 'None':
                                                                     decoded_args['user'] = str(transaction.message.account_keys[0])
                                                                 await handle_message(decoded_args)
-                                                                #websocket_logger.info(f"PUMP TOKEN CREATED")
+                                                                websocket_logger.info(f"PUMP TOKEN CREATED: {decoded_args.get('mint')}")
                                                                 print(json.dumps(decoded_args, indent=2))
                                                                 print("--------------------")
                                                             except Exception as e:
