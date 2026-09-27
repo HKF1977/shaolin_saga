@@ -244,7 +244,7 @@ async def get_token_account_transactions(session, signatures, wallet_address, lo
                     signature,
                     {
                         "encoding": "jsonParsed",
-                        "maxSupportedTransactionVersion": 0
+                        "maxSupportedTransactionVersion": 1
                     }
                 ]
             }
@@ -860,7 +860,7 @@ def register_commands(bot, logger):
                         "method": "getTransaction",
                         "params": [
                             oldest_sig,
-                            {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}
+                            {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 1}
                         ]
                     }
                     

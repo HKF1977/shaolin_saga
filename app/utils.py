@@ -782,7 +782,7 @@ async def get_token_transactions(client, token_address, limit=100):
                         "method": "getTransaction",
                         "params": [
                             signature,
-                            {"encoding": "json", "maxSupportedTransactionVersion": 0}
+                            {"encoding": "json", "maxSupportedTransactionVersion": 1}
                         ]
                     }
 
