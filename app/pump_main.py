@@ -2328,7 +2328,7 @@ async def listen_and_decode_create():
                             "encoding": "base64",
                             "showRewards": False,
                             "transactionDetails": "full",
-                            "maxSupportedTransactionVersion": 0
+                            "maxSupportedTransactionVersion": 1
                         }
                     ]
                 })
@@ -2415,8 +2415,12 @@ async def listen_and_decode_create():
                                         websocket_logger.debug(f"blockNotification: {len(block['transactions'])} transactions")
                                         for tx in block['transactions']:
                                             if isinstance(tx, dict) and 'transaction' in tx:
-                                                tx_data_decoded = base64.b64decode(tx['transaction'][0])
-                                                transaction = VersionedTransaction.from_bytes(tx_data_decoded)
+                                                try:
+                                                    tx_data_decoded = base64.b64decode(tx['transaction'][0])
+                                                    transaction = VersionedTransaction.from_bytes(tx_data_decoded)
+                                                except Exception as decode_error:
+                                                    websocket_logger.debug(f"Skipping undecodable transaction (likely unsupported version): {decode_error}")
+                                                    continue
 
                                                 for ix in transaction.message.instructions:
                                                     if str(transaction.message.account_keys[ix.program_id_index]) == str(PUMP_PROGRAM):

@@ -557,7 +557,7 @@ async def listen_for_bonk_tokens():
                             "encoding": "base64",
                             "showRewards": False,
                             "transactionDetails": "full",
-                            "maxSupportedTransactionVersion": 0
+                            "maxSupportedTransactionVersion": 1
                         }
                     ]
                 })

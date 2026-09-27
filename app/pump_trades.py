@@ -819,7 +819,7 @@ async def get_and_parse_transaction(signature, user_wallet):
         "params": [
             signature,
             {
-                "maxSupportedTransactionVersion": 0,
+                "maxSupportedTransactionVersion": 1,
                 "encoding": "jsonParsed"
             }
         ]
@@ -1000,11 +1000,11 @@ async def listen_and_decode_trades():
                             "encoding": "base64",
                             "showRewards": False,
                             "transactionDetails": "full",
-                            "maxSupportedTransactionVersion": 0
+                            "maxSupportedTransactionVersion": 1
                         }
                     ]
                 })
-                
+
                 #Add reconnection delay
                 await asyncio.sleep(2)
 
@@ -1079,10 +1079,13 @@ async def listen_and_decode_trades():
                                 if block and 'transactions' in block:
                                         for tx in block['transactions']:
                                             if isinstance(tx, dict) and 'transaction' in tx:
-                                                tx_data_decoded = base64.b64decode(tx['transaction'][0])
-                                                #buys_logger.debug(f"Trade Data: {tx_data_decoded}")
-                                                
-                                                transaction = VersionedTransaction.from_bytes(tx_data_decoded)
+                                                try:
+                                                    tx_data_decoded = base64.b64decode(tx['transaction'][0])
+                                                    #buys_logger.debug(f"Trade Data: {tx_data_decoded}")
+                                                    transaction = VersionedTransaction.from_bytes(tx_data_decoded)
+                                                except Exception as decode_error:
+                                                    websocket_secondary_logger.debug(f"Skipping undecodable transaction (likely unsupported version): {decode_error}")
+                                                    continue
                                                 signature = str(transaction.signatures[0]) if transaction.signatures else None
 
                                                 await check_all_wallets_in_transaction(transaction, signature)
